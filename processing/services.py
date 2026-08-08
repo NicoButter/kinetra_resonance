@@ -122,11 +122,12 @@ class StemSeparationService:
         return ', '.join(stem_type.lower() for stem_type in cls.STEM_ORDER if stem_type in stem_types) or 'none'
 
     @staticmethod
-    def clear_previous_outputs(track):
-        """Remove generated outputs while preserving the source and job history."""
-        for artifact in track.analysis_artifacts.all():
+    def clear_previous_outputs(track, processing_job=None):
+        """Replace current stems and retry outputs, preserving prior job artifacts."""
+        artifacts = processing_job.analysis_artifacts.all() if processing_job else track.analysis_artifacts.none()
+        for artifact in artifacts:
             artifact.json_file.delete(save=False)
-        track.analysis_artifacts.all().delete()
+        artifacts.delete()
         for stem in track.stems.all():
             stem.file.delete(save=False)
         track.stems.all().delete()

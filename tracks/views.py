@@ -41,15 +41,35 @@ def track_create(request):
 def track_detail(request, track_id):
     track = get_object_or_404(Track.objects.prefetch_related('processing_jobs', 'stems', 'analysis_artifacts'), id=track_id)
     job = track.processing_jobs.first()
-    drums = track.analysis_artifacts.filter(type=AnalysisArtifact.Type.DRUMS).first()
-    drum_data = None
-    if drums:
+    artifact_rows = []
+    experience = None
+    expected = (
+        (AnalysisArtifact.Type.DRUMS, 'Drums'), (AnalysisArtifact.Type.BASS, 'Bass'),
+        (AnalysisArtifact.Type.GUITAR, 'Guitar'), (AnalysisArtifact.Type.PIANO, 'Piano'),
+        (AnalysisArtifact.Type.VOCALS, 'Vocals'), (AnalysisArtifact.Type.OTHER, 'Other'),
+    )
+    artifacts = {artifact.type: artifact for artifact in job.analysis_artifacts.all()} if job else {}
+    for artifact_type, label in expected:
+        artifact = artifacts.get(artifact_type)
+        row = {'label': label, 'artifact': artifact, 'status': 'Pending', 'count': 0, 'unit': 'events'}
+        if artifact:
+            try:
+                with artifact.json_file.open('r') as artifact_file:
+                    payload = json.load(artifact_file)
+                collection = 'notes' if 'notes' in payload else 'frames' if 'frames' in payload else 'events'
+                row.update(status='Ready', count=len(payload.get(collection, [])), unit=collection, file_size=artifact.json_file.size)
+            except (OSError, json.JSONDecodeError):
+                row['status'] = 'Invalid'
+        artifact_rows.append(row)
+    experience_artifact = artifacts.get(AnalysisArtifact.Type.TELEO_EXPERIENCE)
+    if experience_artifact:
         try:
-            with drums.json_file.open('r') as artifact_file:
-                drum_data = json.load(artifact_file)
+            with experience_artifact.json_file.open('r') as artifact_file:
+                payload = json.load(artifact_file)
+            experience = {'artifact': experience_artifact, 'status': 'Ready', 'version': payload.get('version'), 'duration_ms': payload.get('track', {}).get('durationMs'), 'total_events': len(payload.get('timeline', [])), 'file_size': experience_artifact.json_file.size}
         except (OSError, json.JSONDecodeError):
-            pass
-    return render(request, 'tracks/track_detail.html', {'track': track, 'job': job, 'drums_artifact': drums, 'drum_data': drum_data, 'reprocess_form': ReprocessTrackForm()})
+            experience = {'artifact': experience_artifact, 'status': 'Invalid'}
+    return render(request, 'tracks/track_detail.html', {'track': track, 'job': job, 'artifact_rows': artifact_rows, 'experience': experience, 'reprocess_form': ReprocessTrackForm()})
 
 
 @require_POST
@@ -65,7 +85,7 @@ def track_reprocess(request, track_id):
 
 
 def lab(request):
-    artifacts = AnalysisArtifact.objects.filter(type=AnalysisArtifact.Type.DRUMS, track__processing_jobs__status=ProcessingJob.Status.COMPLETED).select_related('track').distinct()
+    artifacts = AnalysisArtifact.objects.filter(type=AnalysisArtifact.Type.DRUMS, processing_job__status=ProcessingJob.Status.COMPLETED).select_related('track').distinct()
     rows = []
     for artifact in artifacts:
         try:
@@ -107,6 +127,8 @@ def stems_api(request, track_id):
 @require_GET
 def analysis_api(request, track_id):
     track = get_object_or_404(Track, id=track_id)
-    return JsonResponse({'analysis': [{'id': str(item.id), 'type': item.type, 'version': item.version, 'url': item.json_file.url} for item in track.analysis_artifacts.all()]})
+    job = track.processing_jobs.first()
+    artifacts = job.analysis_artifacts.all() if job else []
+    return JsonResponse({'jobId': str(job.id) if job else None, 'analysis': [{'id': str(item.id), 'type': item.type, 'version': item.version, 'url': item.json_file.url} for item in artifacts]})
 
 # Create your views here.

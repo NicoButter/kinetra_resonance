@@ -43,3 +43,9 @@ class TrackTests(TestCase):
     def test_stem_api(self):
         track = self.make_track(); Stem.objects.create(track=track, type=Stem.Type.DRUMS, file='tracks/x/stems/drums.wav')
         self.assertEqual(self.client.get(reverse('stems-api', args=[track.id])).json()['stems'][0]['type'], 'DRUMS')
+    def test_detail_exposes_all_analyzers_and_teleo_experience(self):
+        track = self.make_track(); ProcessingJob.objects.create(track=track)
+        response = self.client.get(reverse('track-detail', args=[track.id]))
+        self.assertContains(response, 'Analysis artifacts')
+        for label in ('Drums', 'Bass', 'Guitar', 'Piano', 'Vocals', 'Other', 'TELEO EXPERIENCE'):
+            self.assertContains(response, label)

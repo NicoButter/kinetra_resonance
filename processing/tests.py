@@ -74,15 +74,17 @@ class ProcessingCommandTests(TestCase):
         self.assertIn('Received: vocals, instrumental', job.error_message)
 
     @patch('processing.services.StemSeparationService.clear_previous_outputs')
-    @patch('analysis.services.DrumsAnalyzer.write')
+    @patch('analysis.services.TeleoExperienceBuilder.build')
+    @patch('analysis.services.BaseAnalyzer.write')
     @patch('processing.services.StemSeparationService.separate')
-    def test_job_completes_with_six_stems_and_analysis(self, separate, analyze, clear):
+    def test_job_completes_with_six_stems_and_analysis(self, separate, analyze, build, clear):
         job = self.make_job()
         stems = {stem_type: Stem.objects.create(track=job.track, type=stem_type, file=f'tracks/{job.track_id}/stems/{stem_type.lower()}.wav') for stem_type in StemSeparationService.PROFILE_STEMS[job.profile]}
         separate.return_value = SeparationResult(job.profile, job.separator_model, stems)
-        artifact_path = TEST_MEDIA / 'tracks' / str(job.track_id) / 'analysis' / 'drums.json'
+        artifact_path = TEST_MEDIA / 'tracks' / str(job.track_id) / 'analysis' / 'artifact.json'
         analyze.return_value = ({'durationMs': 1000}, artifact_path)
+        build.return_value = ({'version': 1}, TEST_MEDIA / 'tracks' / str(job.track_id) / 'analysis' / 'teleo_experience.json')
         call_command('process_track', str(job.id))
         job.refresh_from_db()
         self.assertEqual(job.status, ProcessingJob.Status.COMPLETED)
-        self.assertEqual(job.track.analysis_artifacts.count(), 1)
+        self.assertEqual(job.analysis_artifacts.count(), 7)

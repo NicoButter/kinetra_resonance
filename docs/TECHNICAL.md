@@ -31,9 +31,9 @@ Usar `.env.example` como referencia. Este MVP no carga automáticamente `.env`; 
 | `tracks.Track` | Audio original, metadatos y espacio de almacenamiento de una canción. |
 | `processing.ProcessingJob` | Perfil, modelo, estado, progreso, etapa y error de un intento de procesamiento. |
 | `tracks.Stem` | Un stem realmente generado y su tipo. Restricción única `(track, type)`. |
-| `analysis.AnalysisArtifact` | Salida de análisis versionada; por ahora solo `DRUMS`. |
+| `analysis.AnalysisArtifact` | Salida versionada de un analizador o del Teleo Experience Builder, vinculada al job productor. |
 
-Todos los identificadores primarios son UUID. `ProcessingJob.track` es una clave foránea: una canción puede conservar varios jobs de reprocesamiento. Los stems y artifacts vinculados al Track representan el resultado vigente.
+Todos los identificadores primarios son UUID. `ProcessingJob.track` es una clave foránea: una canción puede conservar varios jobs. Cada artifact tiene una FK obligatoria a su ProcessingJob para impedir que el builder mezcle ejecuciones. Los stems representan la separación vigente; los JSON históricos se conservan por job.
 
 ### Estados de ProcessingJob
 
@@ -57,9 +57,9 @@ Teleo requiere exactamente los tipos vocals, drums, bass, guitar, piano y other.
 
 ## Análisis de batería
 
-`analysis.services.DrumsAnalyzer` carga el audio mono con Essentia. `RhythmExtractor2013(method='multifeature')` devuelve BPM, beats y confianza. Para cada beat se calcula la media de amplitud absoluta en una ventana de 50 ms; el vector resultante se normaliza por su máximo. La salida se redondea y serializa a JSON UTF-8.
+`analysis.services.DrumsAnalyzer` carga el audio mono con Essentia. `RhythmExtractor2013(method='multifeature')` devuelve BPM y confianza. Los eventos parten de transientes por flujo espectral y su clasificación es conservadora; cuando los descriptores no dominan claramente se usa `unknown`.
 
-Actualmente se asume 44.1 kHz al convertir posiciones de beat a índices de muestra. Un refinamiento futuro debería obtener el sample rate efectivo y ampliar la robustez frente a archivos inusuales.
+Todos los analizadores cargan a 44.1 kHz de forma explícita. Bajo, guitarra y piano usan onsets por flujo espectral y pitch por autocorrelación con umbral de confianza. Vocals y other generan frames temporales normalizados. Consultar `ANALYSIS_PIPELINE.md` para algoritmos y limitaciones.
 
 ## Rutas
 

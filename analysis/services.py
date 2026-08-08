@@ -1,37 +1,318 @@
 import json
+import math
+from enum import StrEnum
 from pathlib import Path
 
 import numpy as np
 from django.conf import settings
 
+from analysis.models import AnalysisArtifact
 
-class DrumsAnalyzer:
+
+SAMPLE_RATE = 44100
+ANALYSIS_VERSION = 1
+NOTE_NAMES = ('C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B')
+
+
+class DrumEventType(StrEnum):
+    KICK = 'kick'
+    SNARE = 'snare'
+    HI_HAT = 'hi_hat'
+    CYMBAL = 'cymbal'
+    CRASH = 'crash'
+    UNKNOWN = 'unknown'
+
+
+class AnalysisError(RuntimeError):
+    pass
+
+
+class IncompleteExperienceError(AnalysisError):
+    pass
+
+
+def clamp(value):
+    return round(float(np.clip(value, 0.0, 1.0)), 4)
+
+
+def load_audio(audio_path):
+    import essentia.standard as es
+    return np.asarray(es.MonoLoader(filename=str(audio_path), sampleRate=SAMPLE_RATE)(), dtype=np.float32)
+
+
+def duration_ms(signal):
+    return int(round(len(signal) / SAMPLE_RATE * 1000))
+
+
+def normalized(values):
+    values = np.asarray(values, dtype=float)
+    maximum = float(values.max()) if values.size else 0.0
+    return values / maximum if maximum > 0 else np.zeros_like(values)
+
+
+def spectral_onsets(signal, frame_size=2048, hop_size=512, minimum_gap_ms=80):
+    """Conservative spectral-flux onset detector used by pitched stem analyzers."""
+    if len(signal) < frame_size:
+        return []
+    window = np.hanning(frame_size)
+    spectra = [np.abs(np.fft.rfft(signal[start:start + frame_size] * window)) for start in range(0, len(signal) - frame_size + 1, hop_size)]
+    flux = np.array([0.0] + [float(np.maximum(current - previous, 0).sum()) for previous, current in zip(spectra, spectra[1:])])
+    median = float(np.median(flux))
+    mad = float(np.median(np.abs(flux - median)))
+    threshold = median + max(2.5 * mad, float(flux.max()) * 0.08)
+    candidates = [index for index in range(1, len(flux) - 1) if flux[index] >= threshold and flux[index] >= flux[index - 1] and flux[index] > flux[index + 1]]
+    minimum_frames = max(1, int(minimum_gap_ms / 1000 * SAMPLE_RATE / hop_size))
+    selected = []
+    for index in candidates:
+        if not selected or index - selected[-1] >= minimum_frames:
+            selected.append(index)
+        elif flux[index] > flux[selected[-1]]:
+            selected[-1] = index
+    return [int(round(index * hop_size / SAMPLE_RATE * 1000)) for index in selected]
+
+
+def estimate_pitch(signal, minimum_hz, maximum_hz):
+    """Autocorrelation pitch estimate; returns no pitch below a confidence threshold."""
+    if len(signal) < 256:
+        return None, 0.0
+    frame = np.asarray(signal[:8192], dtype=float)
+    frame -= frame.mean()
+    if float(np.sqrt(np.mean(frame * frame))) < 1e-5:
+        return None, 0.0
+    size = 1 << (2 * len(frame) - 1).bit_length()
+    spectrum = np.fft.rfft(frame, size)
+    correlation = np.fft.irfft(spectrum * np.conj(spectrum), size)[:len(frame)]
+    zero = float(correlation[0])
+    min_lag = max(1, int(SAMPLE_RATE / maximum_hz))
+    max_lag = min(len(correlation) - 1, int(SAMPLE_RATE / minimum_hz))
+    if zero <= 0 or max_lag <= min_lag:
+        return None, 0.0
+    lag = min_lag + int(np.argmax(correlation[min_lag:max_lag + 1]))
+    confidence = clamp(correlation[lag] / zero)
+    if confidence < 0.45:
+        return None, confidence
+    return round(SAMPLE_RATE / lag, 2), confidence
+
+
+def pitch_fields(pitch_hz, confidence):
+    if pitch_hz is None:
+        return {'confidence': confidence}
+    midi = int(round(69 + 12 * math.log2(pitch_hz / 440.0)))
+    note = f'{NOTE_NAMES[midi % 12]}{midi // 12 - 1}'
+    return {'pitchHz': pitch_hz, 'midi': midi, 'note': note, 'confidence': confidence}
+
+
+def write_payload(processing_job, filename, payload, compact=False):
+    track = processing_job.track
+    artifact_dir = Path(settings.MEDIA_ROOT) / 'tracks' / str(track.id) / 'analysis' / str(processing_job.id)
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    path = artifact_dir / filename
+    options = {'ensure_ascii': False}
+    options.update({'separators': (',', ':')} if compact else {'indent': 2})
+    path.write_text(json.dumps(payload, **options), encoding='utf-8')
+    return payload, path
+
+
+class BaseAnalyzer:
+    stem_name = ''
+    filename = ''
+
+    def write(self, processing_job, stem):
+        return write_payload(processing_job, self.filename, self.analyze(stem.file.path))
+
+
+class DrumsAnalyzer(BaseAnalyzer):
+    stem_name = 'drums'
+    filename = 'drums.json'
+
+    @staticmethod
+    def classify_event(segment):
+        if len(segment) < 32:
+            return DrumEventType.UNKNOWN, 0.0
+        spectrum = np.abs(np.fft.rfft(segment * np.hanning(len(segment)))) ** 2
+        frequencies = np.fft.rfftfreq(len(segment), 1 / SAMPLE_RATE)
+        total = float(spectrum.sum()) or 1.0
+        low = float(spectrum[frequencies < 220].sum() / total)
+        mid = float(spectrum[(frequencies >= 220) & (frequencies < 4000)].sum() / total)
+        high = float(spectrum[frequencies >= 4000].sum() / total)
+        candidates = []
+        if low > 0.68: candidates.append((DrumEventType.KICK, low))
+        if mid > 0.72: candidates.append((DrumEventType.SNARE, mid))
+        if high > 0.78: candidates.append((DrumEventType.HI_HAT, high))
+        if not candidates:
+            return DrumEventType.UNKNOWN, clamp(max(low, mid, high) * 0.75)
+        event_type, confidence = max(candidates, key=lambda item: item[1])
+        return (event_type, clamp(confidence)) if confidence >= 0.72 else (DrumEventType.UNKNOWN, clamp(confidence))
+
     def analyze(self, audio_path):
         import essentia.standard as es
+        signal = load_audio(audio_path)
+        bpm, beats, rhythm_confidence, _, _ = es.RhythmExtractor2013(method='multifeature')(signal)
+        onsets = spectral_onsets(signal, minimum_gap_ms=55)
+        event_times = onsets or [int(round(float(beat) * 1000)) for beat in beats]
+        window = int(SAMPLE_RATE * 0.08)
+        strengths = []
+        events = []
+        for time_ms in event_times:
+            index = min(len(signal), int(time_ms / 1000 * SAMPLE_RATE))
+            segment = signal[index:min(index + window, len(signal))]
+            strengths.append(float(np.sqrt(np.mean(segment * segment))) if len(segment) else 0.0)
+            event_type, confidence = self.classify_event(segment)
+            events.append({'timeMs': time_ms, 'durationMs': int(round(len(segment) / SAMPLE_RATE * 1000)), 'type': event_type, 'confidence': confidence})
+        for event, intensity in zip(events, normalized(strengths)):
+            event['intensity'] = clamp(intensity)
+        return {'format': 'kinetra-resonance', 'version': ANALYSIS_VERSION, 'stem': self.stem_name, 'durationMs': duration_ms(signal), 'bpm': round(float(bpm), 2), 'confidence': round(float(rhythm_confidence), 3), 'events': sorted(events, key=lambda event: event['timeMs'])}
 
-        signal = es.MonoLoader(filename=str(audio_path))()
-        sample_rate = 44100
-        duration_ms = int(round(len(signal) / sample_rate * 1000))
-        bpm, beats, confidence, _, _ = es.RhythmExtractor2013(method='multifeature')(signal)
-        beats = np.asarray(beats)
-        if len(beats):
-            indices = np.clip((beats * sample_rate).astype(int), 0, max(len(signal) - 1, 0))
-            window = max(1, int(sample_rate * 0.05))
-            strengths = np.array([np.mean(np.abs(signal[index:min(index + window, len(signal))])) for index in indices])
-            maximum = float(strengths.max()) if strengths.size else 0.0
-            intensities = strengths / maximum if maximum > 0 else np.zeros_like(strengths)
-        else:
-            intensities = np.array([])
-        return {
-            'format': 'kinetra-resonance', 'version': 1, 'stem': 'drums',
-            'durationMs': duration_ms, 'bpm': round(float(bpm), 2), 'confidence': round(float(confidence), 2),
-            'events': [{'timeMs': int(round(float(beat) * 1000)), 'type': 'beat', 'intensity': round(float(np.clip(intensity, 0, 1)), 4)} for beat, intensity in zip(beats, intensities)],
+
+class PitchedStemAnalyzer(BaseAnalyzer):
+    minimum_hz = 40
+    maximum_hz = 1500
+
+    def extra_fields(self, segment):
+        return {}
+
+    def analyze(self, audio_path):
+        signal = load_audio(audio_path)
+        onsets = spectral_onsets(signal)
+        raw_events = []
+        strengths = []
+        total_ms = duration_ms(signal)
+        for index, start_ms in enumerate(onsets):
+            next_ms = onsets[index + 1] if index + 1 < len(onsets) else total_ms
+            end_ms = min(next_ms, start_ms + 1500)
+            if end_ms - start_ms < 60:
+                continue
+            start = int(start_ms / 1000 * SAMPLE_RATE)
+            end = int(end_ms / 1000 * SAMPLE_RATE)
+            segment = signal[start:end]
+            pitch, confidence = estimate_pitch(segment, self.minimum_hz, self.maximum_hz)
+            strength = float(np.sqrt(np.mean(segment * segment))) if len(segment) else 0.0
+            event = {'startMs': start_ms, 'endMs': end_ms, **pitch_fields(pitch, confidence), **self.extra_fields(segment)}
+            raw_events.append(event)
+            strengths.append(strength)
+        for event, intensity in zip(raw_events, normalized(strengths)):
+            event['intensity'] = clamp(intensity)
+        return {'format': 'kinetra-resonance', 'version': ANALYSIS_VERSION, 'stem': self.stem_name, 'durationMs': total_ms, 'notes': raw_events}
+
+
+class BassAnalyzer(PitchedStemAnalyzer):
+    stem_name = 'bass'; filename = 'bass.json'; minimum_hz = 30; maximum_hz = 400
+
+
+class GuitarAnalyzer(PitchedStemAnalyzer):
+    stem_name = 'guitar'; filename = 'guitar.json'; minimum_hz = 65; maximum_hz = 1400
+    def extra_fields(self, segment):
+        attack_size = min(len(segment), int(SAMPLE_RATE * 0.05))
+        peak = float(np.max(np.abs(segment))) if len(segment) else 0.0
+        attack_peak = float(np.max(np.abs(segment[:attack_size]))) if attack_size else 0.0
+        return {'attack': clamp(attack_peak / peak if peak else 0.0)}
+
+
+class PianoAnalyzer(PitchedStemAnalyzer):
+    stem_name = 'piano'; filename = 'piano.json'; minimum_hz = 27.5; maximum_hz = 4200
+
+
+class VocalsAnalyzer(BaseAnalyzer):
+    stem_name = 'vocals'; filename = 'vocals.json'
+    def __init__(self, frame_interval_ms=40, maximum_unchanged_ms=200):
+        self.frame_interval_ms = max(20, min(100, int(frame_interval_ms)))
+        self.maximum_unchanged_ms = max(self.frame_interval_ms, int(maximum_unchanged_ms))
+
+    def analyze(self, audio_path):
+        signal = load_audio(audio_path)
+        frame_size = int(SAMPLE_RATE * self.frame_interval_ms / 1000)
+        rms_values = [float(np.sqrt(np.mean(signal[start:start + frame_size] ** 2))) for start in range(0, len(signal), frame_size)]
+        presence_values = normalized(rms_values)
+        frames = []
+        previous = None
+        for frame_index, (start, rms, presence) in enumerate(zip(range(0, len(signal), frame_size), rms_values, presence_values)):
+            frame = signal[start:start + frame_size]
+            pitch, confidence = estimate_pitch(frame, 70, 1100)
+            spectrum = np.abs(np.fft.rfft(frame * np.hanning(len(frame)))) ** 2 if len(frame) else np.array([])
+            frequencies = np.fft.rfftfreq(len(frame), 1 / SAMPLE_RATE) if len(frame) else np.array([])
+            brightness = float((spectrum[frequencies >= 3000].sum() / spectrum.sum())) if spectrum.size and spectrum.sum() else 0.0
+            item = {'timeMs': frame_index * self.frame_interval_ms, 'presence': clamp(presence), 'intensity': clamp(presence), 'pitchHz': pitch, 'pitchNormalized': clamp((math.log2(pitch / 70) / math.log2(1100 / 70)) if pitch else 0.0), 'pitchConfidence': confidence, 'spectralBrightness': clamp(brightness)}
+            changed = previous is None or abs(item['presence'] - previous['presence']) > 0.04 or abs(item['spectralBrightness'] - previous['spectralBrightness']) > 0.04 or abs(item['pitchNormalized'] - previous['pitchNormalized']) > 0.02
+            expired = previous is not None and item['timeMs'] - previous['timeMs'] >= self.maximum_unchanged_ms
+            if changed or expired:
+                frames.append(item)
+                previous = item
+        return {'format': 'kinetra-resonance', 'version': ANALYSIS_VERSION, 'stem': self.stem_name, 'durationMs': duration_ms(signal), 'frameIntervalMs': self.frame_interval_ms, 'frames': frames, 'visemes': []}
+
+
+class OtherAnalyzer(BaseAnalyzer):
+    stem_name = 'other'; filename = 'other.json'
+    def __init__(self, frame_interval_ms=50, maximum_unchanged_ms=200):
+        self.frame_interval_ms = max(20, min(100, int(frame_interval_ms)))
+        self.maximum_unchanged_ms = max(self.frame_interval_ms, int(maximum_unchanged_ms))
+
+    def analyze(self, audio_path):
+        signal = load_audio(audio_path)
+        frame_size = int(SAMPLE_RATE * self.frame_interval_ms / 1000)
+        raw = []
+        for index, start in enumerate(range(0, len(signal), frame_size)):
+            frame = signal[start:start + frame_size]
+            spectrum = np.abs(np.fft.rfft(frame * np.hanning(len(frame)))) ** 2 if len(frame) else np.array([])
+            frequencies = np.fft.rfftfreq(len(frame), 1 / SAMPLE_RATE) if len(frame) else np.array([])
+            raw.append((index * self.frame_interval_ms, float(spectrum[frequencies < 250].sum()), float(spectrum[(frequencies >= 250) & (frequencies < 4000)].sum()), float(spectrum[frequencies >= 4000].sum()), float(np.sqrt(np.mean(frame * frame))) if len(frame) else 0.0))
+        scales = [max((row[column] for row in raw), default=0.0) for column in range(1, 5)]
+        frames = []
+        previous = None
+        for row in raw:
+            item = {'timeMs': row[0], 'lowEnergy': clamp(row[1] / scales[0] if scales[0] else 0), 'midEnergy': clamp(row[2] / scales[1] if scales[1] else 0), 'highEnergy': clamp(row[3] / scales[2] if scales[2] else 0), 'overallEnergy': clamp(row[4] / scales[3] if scales[3] else 0)}
+            changed = previous is None or any(abs(item[key] - previous[key]) > 0.04 for key in ('lowEnergy', 'midEnergy', 'highEnergy', 'overallEnergy'))
+            expired = previous is not None and item['timeMs'] - previous['timeMs'] >= self.maximum_unchanged_ms
+            if changed or expired:
+                frames.append(item)
+                previous = item
+        return {'format': 'kinetra-resonance', 'version': ANALYSIS_VERSION, 'stem': self.stem_name, 'durationMs': duration_ms(signal), 'frameIntervalMs': self.frame_interval_ms, 'frames': frames}
+
+
+class TeleoExperienceBuilder:
+    REQUIRED_TYPES = {
+        AnalysisArtifact.Type.DRUMS, AnalysisArtifact.Type.BASS,
+        AnalysisArtifact.Type.GUITAR, AnalysisArtifact.Type.PIANO,
+        AnalysisArtifact.Type.VOCALS, AnalysisArtifact.Type.OTHER,
+    }
+
+    def load_artifacts(self, processing_job):
+        artifacts = processing_job.analysis_artifacts.filter(type__in=self.REQUIRED_TYPES)
+        loaded = {}
+        for artifact in artifacts:
+            with artifact.json_file.open('r') as artifact_file:
+                loaded[artifact.type] = json.load(artifact_file)
+        missing = self.REQUIRED_TYPES - set(loaded)
+        if missing:
+            names = ', '.join(sorted(item.lower() for item in missing))
+            raise IncompleteExperienceError(f'Teleo Experience is incomplete. Missing analysis artifacts: {names}.')
+        return loaded
+
+    @staticmethod
+    def build_timeline(loaded):
+        timeline = []
+        for event in loaded[AnalysisArtifact.Type.DRUMS].get('events', []):
+            timeline.append({'timeMs': int(event['timeMs']), 'channel': 'drums', 'type': event.get('type', 'unknown'), 'intensity': event.get('intensity', 0.0)})
+        for artifact_type, channel in ((AnalysisArtifact.Type.BASS, 'bass'), (AnalysisArtifact.Type.GUITAR, 'guitar'), (AnalysisArtifact.Type.PIANO, 'piano')):
+            for note in loaded[artifact_type].get('notes', []):
+                payload = {key: note[key] for key in ('midi', 'note', 'endMs') if key in note}
+                timeline.append({'timeMs': int(note['startMs']), 'channel': channel, 'type': 'note', 'intensity': note.get('intensity', 0.0), 'payload': payload})
+        return sorted(timeline, key=lambda event: (event['timeMs'], event['channel']))
+
+    def build(self, processing_job):
+        loaded = self.load_artifacts(processing_job)
+        track = processing_job.track
+        drums = loaded[AnalysisArtifact.Type.DRUMS]
+        timeline = self.build_timeline(loaded)
+        payload = {
+            'format': 'teleo-music', 'version': 1,
+            'analysis': {'engine': 'kinetra-resonance', 'analysisVersion': ANALYSIS_VERSION},
+            'track': {'id': str(track.id), 'title': track.title, 'artist': track.artist, 'durationMs': track.duration_ms or drums.get('durationMs'), 'bpm': drums.get('bpm')},
+            'drums': {'events': drums.get('events', [])},
+            'bass': {'notes': loaded[AnalysisArtifact.Type.BASS].get('notes', [])},
+            'guitar': {'notes': loaded[AnalysisArtifact.Type.GUITAR].get('notes', [])},
+            'piano': {'notes': loaded[AnalysisArtifact.Type.PIANO].get('notes', [])},
+            'vocals': {'frames': loaded[AnalysisArtifact.Type.VOCALS].get('frames', []), 'visemes': []},
+            'other': {'frames': loaded[AnalysisArtifact.Type.OTHER].get('frames', [])},
+            'timeline': timeline, 'lyrics': [], 'sections': [], 'haptics': [],
         }
-
-    def write(self, track, stem):
-        artifact_dir = Path(settings.MEDIA_ROOT) / 'tracks' / str(track.id) / 'analysis'
-        artifact_dir.mkdir(parents=True, exist_ok=True)
-        payload = self.analyze(stem.file.path)
-        path = artifact_dir / 'drums.json'
-        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
-        return payload, path
+        return write_payload(processing_job, 'teleo_experience.json', payload, compact=True)

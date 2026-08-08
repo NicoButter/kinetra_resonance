@@ -33,8 +33,9 @@ El repositorio contiene un MVP Django local funcional con:
 - comando `python manage.py process_track <job_uuid>`;
 - separación con la CLI de `audio-separator`;
 - registro únicamente de stems efectivamente producidos;
-- análisis básico del stem `DRUMS` con Essentia (`MonoLoader` y `RhythmExtractor2013`);
-- archivo `drums.json` con duración, BPM, confianza, beats e intensidad normalizada;
+- analizadores separados para drums, bass, guitar, piano, vocals y other;
+- artifacts JSON asociados obligatoriamente al ProcessingJob productor;
+- `TeleoExperienceBuilder` que valida los seis artifacts y genera `teleo_experience.json`;
 - polling de estado en `/api/jobs/<uuid>/status/`;
 - APIs JSON internas de tracks, stems y artifacts;
 - página `/lab/` con análisis de batería finalizados;
@@ -60,7 +61,7 @@ No se usa Celery, Redis, PostgreSQL, Docker, DRF ni WebSockets por ahora. SQLite
 media/tracks/<track_uuid>/
 ├── source/original.<ext>
 ├── stems/<tipo>.<ext>
-└── analysis/drums.json
+└── analysis/<job_uuid>/{drums,bass,guitar,piano,vocals,other,teleo_experience}.json
 ```
 
 Los nombres de directorio no dependen del título. La carga restringe extensiones y tamaño; `MAX_UPLOAD_SIZE_MB` vale 250 por defecto.
@@ -71,8 +72,8 @@ Los nombres de directorio no dependen del título. La carga restringe extensione
 2. `SEPARATING`: ejecuta `audio-separator` sin shell, con modelo, directorio, WAV y nombres de salida explícitos.
 3. Detecta nombres de stem reconocibles: vocals, drums, bass, guitar, piano, other e instrumental.
 4. En Teleo valida obligatoriamente los seis tipos; si falta alguno finaliza en `INCOMPLETE`.
-5. `ANALYZING`: analiza el stem `DRUMS` y escribe `drums.json`.
-6. Crea o actualiza `AnalysisArtifact(DRUMS, version=1)` y finaliza en `COMPLETED`; ante error persiste `FAILED`.
+5. `ANALYZING`: ejecuta secuencialmente los seis analizadores y registra cada artifact para el job actual.
+6. `BUILDING`: valida el conjunto y genera `teleo_experience.json`; solo entonces finaliza en `COMPLETED`.
 
 El perfil predeterminado es `TELEO_6_STEM`, con `htdemucs_6s.yaml`. `VOCAL_EXTRACTION` conserva la salida vocals/instrumental con `UVR-MDX-NET-Inst_HQ_4.onnx`. Ambos modelos son configurables por entorno. No se debe suponer GPU disponible.
 

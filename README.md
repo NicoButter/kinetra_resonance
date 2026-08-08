@@ -2,7 +2,7 @@
 
 **Music Separation & Analysis Engine**
 
-Kinetra Resonance transforma audio musical proporcionado por el usuario en stems y datos estructurados para futuras experiencias visuales y hápticas.
+Kinetra Resonance converts music into structured temporal data for visual and tactile experiences. Stem separation is an intermediate processing step, not the final product.
 
 ```text
 Audio
@@ -22,8 +22,9 @@ Visual / Haptic Applications
 - Conserva el audio original de forma aislada por UUID.
 - Ejecuta `audio-separator` en un proceso local separado de la petición web.
 - Detecta y registra únicamente los stems producidos: vocals, drums, bass, guitar, piano, other e instrumental.
-- Analiza el stem de batería con Essentia y genera `drums.json`.
-- Muestra progreso con polling, permite descargar el original, stems y JSON, y conserva historial de trabajos.
+- Ejecuta analizadores específicos para drums, bass, guitar, piano, vocals y other.
+- Construye `teleo_experience.json`, el producto final consumible por Teleo.
+- Muestra progreso con polling, conteos, tamaños y descargas, y conserva historial de trabajos.
 
 ## Inicio rápido
 
@@ -63,9 +64,20 @@ Una canción existente puede reprocesarse desde su página de detalle con otro p
 media/tracks/<track_uuid>/
 ├── source/original.<extension>
 ├── stems/
+│   ├── vocals.wav
 │   ├── drums.wav
-│   └── ...stems disponibles
-└── analysis/drums.json
+│   ├── bass.wav
+│   ├── guitar.wav
+│   ├── piano.wav
+│   └── other.wav
+└── analysis/<job_uuid>/
+    ├── drums.json
+    ├── bass.json
+    ├── guitar.json
+    ├── piano.json
+    ├── vocals.json
+    ├── other.json
+    └── teleo_experience.json
 ```
 
 Ejemplo de salida:
@@ -94,6 +106,7 @@ python manage.py test
 La documentación ampliada está en:
 
 - [Documentación técnica](docs/TECHNICAL.md)
+- [Pipeline de análisis y Teleo Experience](docs/ANALYSIS_PIPELINE.md)
 - [Contexto para ChatGPT](docs/CHATGPT_CONTEXT.md)
 
 ## Alcance actual
@@ -105,7 +118,7 @@ Original audio → 6-stem separation → Per-stem analyzers
                → Structured JSON artifacts → Teleo Experience package
 ```
 
-Los WAV son material intermedio. El producto futuro estará compuesto principalmente por `metadata.json`, archivos por instrumento, `timeline.json`, `visemes.json` y `haptics.json`. El MVP implementa únicamente BPM, beats, timestamps e intensidad normalizada de batería.
+Los WAV son material intermedio. El producto principal actual es `teleo_experience.json`. La extracción de pitch es conservadora y aproximada; piano todavía usa análisis monofónico, la clasificación de percusión es heurística y visemas, letras, secciones y háptica permanecen vacíos, sin información ficticia.
 
 Kinetra Resonance no descarga música ni elude DRM. Las personas usuarias son responsables de procesar únicamente audio para el que tengan autorización legal.
 
