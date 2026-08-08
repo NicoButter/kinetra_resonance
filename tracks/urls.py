@@ -1,0 +1,9 @@
+from django.urls import path
+from . import views
+
+urlpatterns = [
+    path('', views.home, name='home'),
+    path('tracks/new/', views.track_create, name='track-create'),
+    path('tracks/<uuid:track_id>/', views.track_detail, name='track-detail'),
+    path('lab/', views.lab, name='lab'),
+]
