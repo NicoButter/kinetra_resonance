@@ -1,0 +1,39 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Django
+db.sqlite3
+*.sqlite3
+staticfiles/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Audio / processing
+media/
+input/
+output/
+models/
+*.wav
+*.mp3
+*.flac
+*.m4a
+*.aac
+*.ogg
+
+# Generated analysis
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
