@@ -38,7 +38,7 @@ python manage.py runserver
 Abrí http://127.0.0.1:8000 y elegí **Process music**. La carga crea un job que se ejecuta en segundo plano. También se puede procesar manualmente:
 
 ```bash
-python manage.py process_track <track_uuid>
+python manage.py process_track <job_uuid>
 ```
 
 ## Configuración
@@ -48,11 +48,14 @@ Copiá `.env.example` o exportá las variables necesarias en el entorno desde el
 ```bash
 DJANGO_SECRET_KEY=
 DJANGO_DEBUG=True
-AUDIO_SEPARATOR_DEFAULT_MODEL=UVR-MDX-NET-Inst_HQ_4.onnx
+TELEO_SEPARATOR_MODEL=htdemucs_6s.yaml
+VOCAL_SEPARATOR_MODEL=UVR-MDX-NET-Inst_HQ_4.onnx
 MAX_UPLOAD_SIZE_MB=250
 ```
 
-El soporte GPU depende del runtime local. El proyecto puede ejecutarse en CPU cuando CUDA no está disponible. La primera ejecución de `audio-separator` puede requerir descargar el modelo seleccionado.
+El perfil predeterminado, **Teleo Music — 6 stems**, usa `htdemucs_6s.yaml` y exige vocals, drums, bass, guitar, piano y other. El perfil opcional **Vocal extraction** usa `UVR-MDX-NET-Inst_HQ_4.onnx`. El soporte GPU depende del runtime local; la primera ejecución de cada modelo puede requerir descargarlo.
+
+Una canción existente puede reprocesarse desde su página de detalle con otro perfil o modelo sin volver a subir el audio. Cada intento conserva su `ProcessingJob`; los stems y artifacts representan siempre la salida vigente.
 
 ## Archivos producidos
 
@@ -95,7 +98,14 @@ La documentación ampliada está en:
 
 ## Alcance actual
 
-El MVP implementa BPM, beats, timestamps e intensidad normalizada para batería. Aún no incluye clasificación kick/snare/hi-hat/cymbal, análisis de voz o letras, visemas, traducción, API para Teleo, Celery, Redis, PostgreSQL, Docker ni procesamiento distribuido.
+El pipeline previsto para Teleo es:
+
+```text
+Original audio → 6-stem separation → Per-stem analyzers
+               → Structured JSON artifacts → Teleo Experience package
+```
+
+Los WAV son material intermedio. El producto futuro estará compuesto principalmente por `metadata.json`, archivos por instrumento, `timeline.json`, `visemes.json` y `haptics.json`. El MVP implementa únicamente BPM, beats, timestamps e intensidad normalizada de batería.
 
 Kinetra Resonance no descarga música ni elude DRM. Las personas usuarias son responsables de procesar únicamente audio para el que tengan autorización legal.
 

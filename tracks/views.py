@@ -1,20 +1,23 @@
 import json
 import os
 
-from django.conf import settings
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
-from django.views.decorators.http import require_GET
+from django.views.decorators.http import require_GET, require_POST
 
 from analysis.models import AnalysisArtifact
 from processing.models import ProcessingJob
-from .forms import TrackUploadForm
+from processing.services import StemSeparationService
+from .forms import ReprocessTrackForm, TrackUploadForm
 from .models import Track
 from .services import launch_processing
 
 
 def home(request):
-    return render(request, 'tracks/home.html', {'tracks': Track.objects.select_related('processing_job').prefetch_related('stems')[:12]})
+    tracks = list(Track.objects.prefetch_related('processing_jobs', 'stems')[:12])
+    for track in tracks:
+        track.current_job = track.processing_jobs.first()
+    return render(request, 'tracks/home.html', {'tracks': tracks})
 
 
 def track_create(request):
@@ -25,8 +28,10 @@ def track_create(request):
             original_name = os.path.basename(audio.name)
             track = Track(title=form.cleaned_data['title'], artist=form.cleaned_data['artist'], original_filename=original_name, file_size=audio.size)
             track.source_file.save(original_name, audio, save=True)
-            job = ProcessingJob.objects.create(track=track, separator_model=form.cleaned_data['separator_model'] or settings.AUDIO_SEPARATOR_DEFAULT_MODEL)
-            launch_processing(track.id)
+            profile = form.cleaned_data['profile']
+            model = form.cleaned_data['separator_model'] or StemSeparationService.model_for_profile(profile)
+            job = ProcessingJob.objects.create(track=track, profile=profile, separator_model=model)
+            launch_processing(job.id)
             return redirect('track-detail', track_id=track.id)
     else:
         form = TrackUploadForm()
@@ -34,7 +39,8 @@ def track_create(request):
 
 
 def track_detail(request, track_id):
-    track = get_object_or_404(Track.objects.select_related('processing_job').prefetch_related('stems', 'analysis_artifacts'), id=track_id)
+    track = get_object_or_404(Track.objects.prefetch_related('processing_jobs', 'stems', 'analysis_artifacts'), id=track_id)
+    job = track.processing_jobs.first()
     drums = track.analysis_artifacts.filter(type=AnalysisArtifact.Type.DRUMS).first()
     drum_data = None
     if drums:
@@ -43,11 +49,23 @@ def track_detail(request, track_id):
                 drum_data = json.load(artifact_file)
         except (OSError, json.JSONDecodeError):
             pass
-    return render(request, 'tracks/track_detail.html', {'track': track, 'drums_artifact': drums, 'drum_data': drum_data})
+    return render(request, 'tracks/track_detail.html', {'track': track, 'job': job, 'drums_artifact': drums, 'drum_data': drum_data, 'reprocess_form': ReprocessTrackForm()})
+
+
+@require_POST
+def track_reprocess(request, track_id):
+    track = get_object_or_404(Track, id=track_id)
+    form = ReprocessTrackForm(request.POST)
+    if form.is_valid():
+        profile = form.cleaned_data['profile']
+        model = form.cleaned_data['separator_model'] or StemSeparationService.model_for_profile(profile)
+        job = ProcessingJob.objects.create(track=track, profile=profile, separator_model=model)
+        launch_processing(job.id)
+    return redirect('track-detail', track_id=track.id)
 
 
 def lab(request):
-    artifacts = AnalysisArtifact.objects.filter(type=AnalysisArtifact.Type.DRUMS, track__processing_job__status=ProcessingJob.Status.COMPLETED).select_related('track')
+    artifacts = AnalysisArtifact.objects.filter(type=AnalysisArtifact.Type.DRUMS, track__processing_jobs__status=ProcessingJob.Status.COMPLETED).select_related('track').distinct()
     rows = []
     for artifact in artifacts:
         try:
@@ -62,21 +80,22 @@ def lab(request):
 @require_GET
 def job_status(request, job_id):
     job = get_object_or_404(ProcessingJob, id=job_id)
-    return JsonResponse({'id': str(job.id), 'status': job.status, 'progress': job.progress, 'currentStage': job.current_stage, 'errorMessage': job.error_message})
+    return JsonResponse({'id': str(job.id), 'status': job.status, 'progress': job.progress, 'currentStage': job.current_stage, 'errorMessage': job.error_message, 'profile': job.profile, 'separatorModel': job.separator_model})
 
 
 def serialize_track(track):
-    return {'id': str(track.id), 'title': track.title, 'artist': track.artist, 'durationMs': track.duration_ms, 'fileSize': track.file_size, 'createdAt': track.created_at.isoformat(), 'status': getattr(track.processing_job, 'status', None)}
+    job = track.processing_jobs.first()
+    return {'id': str(track.id), 'title': track.title, 'artist': track.artist, 'durationMs': track.duration_ms, 'fileSize': track.file_size, 'createdAt': track.created_at.isoformat(), 'status': job.status if job else None}
 
 
 @require_GET
 def track_list_api(request):
-    return JsonResponse({'tracks': [serialize_track(track) for track in Track.objects.select_related('processing_job')]})
+    return JsonResponse({'tracks': [serialize_track(track) for track in Track.objects.prefetch_related('processing_jobs')]})
 
 
 @require_GET
 def track_detail_api(request, track_id):
-    return JsonResponse(serialize_track(get_object_or_404(Track.objects.select_related('processing_job'), id=track_id)))
+    return JsonResponse(serialize_track(get_object_or_404(Track.objects.prefetch_related('processing_jobs'), id=track_id)))
 
 
 @require_GET

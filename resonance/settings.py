@@ -122,7 +122,10 @@ STATIC_URL = 'static/'
 STATICFILES_DIRS = [BASE_DIR / 'static']
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
-AUDIO_SEPARATOR_DEFAULT_MODEL = os.environ.get('AUDIO_SEPARATOR_DEFAULT_MODEL', 'UVR-MDX-NET-Inst_HQ_4.onnx')
+TELEO_SEPARATOR_MODEL = os.environ.get('TELEO_SEPARATOR_MODEL', 'htdemucs_6s.yaml')
+VOCAL_SEPARATOR_MODEL = os.environ.get('VOCAL_SEPARATOR_MODEL', 'UVR-MDX-NET-Inst_HQ_4.onnx')
+# Backwards-compatible alias for integrations that still read the old setting.
+AUDIO_SEPARATOR_DEFAULT_MODEL = TELEO_SEPARATOR_MODEL
 MAX_UPLOAD_SIZE_MB = int(os.environ.get('MAX_UPLOAD_SIZE_MB', '250'))
 
 

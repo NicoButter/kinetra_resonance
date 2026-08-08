@@ -29,7 +29,8 @@ El repositorio contiene un MVP Django local funcional con:
 - `Track`, `ProcessingJob`, `Stem` y `AnalysisArtifact` con UUIDs;
 - guardado aislado por canción en `media/tracks/<track_uuid>/`;
 - un job local iniciado fuera del ciclo HTTP mediante `subprocess.Popen`;
-- comando `python manage.py process_track <track_uuid>`;
+- perfiles explícitos `TELEO_6_STEM` y `VOCAL_EXTRACTION`;
+- comando `python manage.py process_track <job_uuid>`;
 - separación con la CLI de `audio-separator`;
 - registro únicamente de stems efectivamente producidos;
 - análisis básico del stem `DRUMS` con Essentia (`MonoLoader` y `RhythmExtractor2013`);
@@ -51,7 +52,7 @@ static/      estilos
 docs/        documentación de producto y técnica
 ```
 
-No se usa Celery, Redis, PostgreSQL, Docker, DRF ni WebSockets por ahora. SQLite y una ejecución local en proceso separado son decisiones deliberadas del MVP. La capa `StemSeparationService` permite sustituir más adelante el mecanismo de ejecución por una cola.
+No se usa Celery, Redis, PostgreSQL, Docker, DRF ni WebSockets por ahora. SQLite y una ejecución local en proceso separado son decisiones deliberadas del MVP. Cada Track conserva historial de ProcessingJobs y puede reprocesarse sin volver a cargar el source.
 
 ## Datos y archivos
 
@@ -67,13 +68,13 @@ Los nombres de directorio no dependen del título. La carga restringe extensione
 ## Pipeline de job
 
 1. `PENDING` → `PREPARING` (crea/prepara workspace).
-2. `SEPARATING`: ejecuta `audio-separator -m <modelo> -o <stems_dir> <source>` sin shell.
+2. `SEPARATING`: ejecuta `audio-separator` sin shell, con modelo, directorio, WAV y nombres de salida explícitos.
 3. Detecta nombres de stem reconocibles: vocals, drums, bass, guitar, piano, other e instrumental.
-4. `ANALYZING`: si existe `DRUMS`, analiza beats y escribe `drums.json`.
-5. Crea o actualiza `AnalysisArtifact(DRUMS, version=1)`.
-6. Finaliza en `COMPLETED`; ante error persiste `FAILED` y un mensaje.
+4. En Teleo valida obligatoriamente los seis tipos; si falta alguno finaliza en `INCOMPLETE`.
+5. `ANALYZING`: analiza el stem `DRUMS` y escribe `drums.json`.
+6. Crea o actualiza `AnalysisArtifact(DRUMS, version=1)` y finaliza en `COMPLETED`; ante error persiste `FAILED`.
 
-El modelo predeterminado es `UVR-MDX-NET-Inst_HQ_4.onnx`, ajustable con `AUDIO_SEPARATOR_DEFAULT_MODEL`. `audio-separator` puede requerir descargar el modelo la primera vez. El entorno instalado incluye soporte GPU, aunque la última verificación detectó CUDA no disponible (`torch.cuda.is_available() == False`), por lo que no se debe suponer GPU.
+El perfil predeterminado es `TELEO_6_STEM`, con `htdemucs_6s.yaml`. `VOCAL_EXTRACTION` conserva la salida vocals/instrumental con `UVR-MDX-NET-Inst_HQ_4.onnx`. Ambos modelos son configurables por entorno. No se debe suponer GPU disponible.
 
 ## Formato de drums.json
 
@@ -106,3 +107,5 @@ Los timestamps están en milisegundos e `intensity` siempre pertenece a `[0.0, 1
 ## Próximo hito
 
 Mejorar `DrumsAnalyzer` para detectar y clasificar `kick`, `snare`, `hi-hat` y `cymbal`, sin empezar todavía análisis de voz, letras, visemas o API de Teleo.
+
+El destino arquitectónico es: audio original → seis stems → analizadores por stem → JSON estructurados (`metadata`, instrumentos, timeline, visemas, haptics) → paquete de experiencia Teleo. Los WAV son material intermedio, no el producto final principal.

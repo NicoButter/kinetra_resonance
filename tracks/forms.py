@@ -2,13 +2,27 @@ import os
 
 from django import forms
 from django.conf import settings
+from processing.models import ProcessingProfile
 
 
-class TrackUploadForm(forms.Form):
+class ProcessingOptionsForm(forms.Form):
+    profile = forms.ChoiceField(
+        choices=ProcessingProfile.choices,
+        initial=ProcessingProfile.TELEO_6_STEM,
+        label='Processing profile',
+        widget=forms.RadioSelect,
+        help_text='Teleo separates vocals, drums, bass, guitar, piano and other instruments.',
+    )
+    separator_model = forms.CharField(max_length=255, required=False, label='Separation model override (optional)')
+
+
+class TrackUploadForm(ProcessingOptionsForm):
     title = forms.CharField(max_length=255)
     artist = forms.CharField(max_length=255, required=False)
     source_file = forms.FileField(label='Audio file')
-    separator_model = forms.CharField(max_length=255, required=False, label='Separation model (optional)')
+
+
+    field_order = ['title', 'artist', 'source_file', 'profile', 'separator_model']
 
     def clean_source_file(self):
         audio = self.cleaned_data['source_file']
@@ -21,3 +35,7 @@ class TrackUploadForm(forms.Form):
         if audio.size > settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024:
             raise forms.ValidationError(f'Files must be at most {settings.MAX_UPLOAD_SIZE_MB} MB.')
         return audio
+
+
+class ReprocessTrackForm(ProcessingOptionsForm):
+    pass

@@ -3,7 +3,7 @@ from .models import ProcessingJob
 
 @admin.register(ProcessingJob)
 class ProcessingJobAdmin(admin.ModelAdmin):
-    list_display = ('track', 'status', 'progress', 'current_stage', 'created_at')
-    list_filter = ('status',)
+    list_display = ('track', 'profile', 'separator_model', 'status', 'progress', 'created_at')
+    list_filter = ('profile', 'status')
 
 # Register your models here.

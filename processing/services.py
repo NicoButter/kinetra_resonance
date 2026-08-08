@@ -1,8 +1,12 @@
+import json
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 from django.conf import settings
+
+from processing.models import ProcessingProfile
 from tracks.models import Stem
 
 
@@ -10,11 +14,45 @@ class SeparationError(RuntimeError):
     pass
 
 
+@dataclass(frozen=True)
+class SeparationResult:
+    profile: str
+    model: str
+    stems: dict[str, Stem]
+
+    @property
+    def received_types(self):
+        return set(self.stems)
+
+
 class StemSeparationService:
-    """Small CLI adapter; replaceable by a queue worker or Python API later."""
-    STEM_NAMES = {
-        'vocals': Stem.Type.VOCALS, 'drums': Stem.Type.DRUMS, 'bass': Stem.Type.BASS,
-        'guitar': Stem.Type.GUITAR, 'piano': Stem.Type.PIANO, 'other': Stem.Type.OTHER,
+    """Profile-aware adapter around the audio-separator CLI."""
+
+    PROFILE_STEMS = {
+        ProcessingProfile.TELEO_6_STEM: {
+            Stem.Type.VOCALS, Stem.Type.DRUMS, Stem.Type.BASS,
+            Stem.Type.GUITAR, Stem.Type.PIANO, Stem.Type.OTHER,
+        },
+        ProcessingProfile.VOCAL_EXTRACTION: {Stem.Type.VOCALS, Stem.Type.INSTRUMENTAL},
+    }
+    STEM_ORDER = (
+        Stem.Type.VOCALS, Stem.Type.DRUMS, Stem.Type.BASS,
+        Stem.Type.GUITAR, Stem.Type.PIANO, Stem.Type.OTHER,
+        Stem.Type.INSTRUMENTAL,
+    )
+    OUTPUT_NAMES = {
+        ProcessingProfile.TELEO_6_STEM: {
+            'Vocals': 'vocals', 'Drums': 'drums', 'Bass': 'bass',
+            'Guitar': 'guitar', 'Piano': 'piano', 'Other': 'other',
+        },
+        ProcessingProfile.VOCAL_EXTRACTION: {
+            'Vocals': 'vocals', 'Instrumental': 'instrumental',
+        },
+    }
+    NORMALIZED_NAMES = {
+        'vocals': Stem.Type.VOCALS, 'drums': Stem.Type.DRUMS,
+        'bass': Stem.Type.BASS, 'guitar': Stem.Type.GUITAR,
+        'piano': Stem.Type.PIANO, 'other': Stem.Type.OTHER,
         'instrumental': Stem.Type.INSTRUMENTAL,
     }
 
@@ -23,39 +61,72 @@ class StemSeparationService:
 
     @staticmethod
     def available_models():
-        return []  # Deliberately lazy: audio-separator downloads/listing is optional.
+        return []
 
-    def separate(self, track, model=None):
-        model = model or settings.AUDIO_SEPARATOR_DEFAULT_MODEL
+    @staticmethod
+    def model_for_profile(profile):
+        if profile == ProcessingProfile.TELEO_6_STEM:
+            return settings.TELEO_SEPARATOR_MODEL
+        if profile == ProcessingProfile.VOCAL_EXTRACTION:
+            return settings.VOCAL_SEPARATOR_MODEL
+        raise SeparationError(f'Unsupported processing profile: {profile}')
+
+    def separate(self, track, profile, model=None):
+        model = model or self.model_for_profile(profile)
         output_dir = Path(settings.MEDIA_ROOT) / 'tracks' / str(track.id) / 'stems'
         output_dir.mkdir(parents=True, exist_ok=True)
-        if not Path(self.executable).is_file():
-            executable = shutil.which('audio-separator')
-        else:
-            executable = self.executable
+        executable = self.executable if Path(self.executable).is_file() else shutil.which('audio-separator')
         if not executable:
             raise SeparationError('audio-separator executable was not found in the active environment.')
-        result = subprocess.run(
-            [executable, '-m', model, '-o', str(output_dir), str(track.source_file.path)],
-            capture_output=True, text=True, check=False,
-        )
+        command = [
+            executable, '-m', model,
+            '--output_dir', str(output_dir),
+            '--output_format', 'WAV',
+            '--custom_output_names', json.dumps(self.OUTPUT_NAMES[profile]),
+            str(track.source_file.path),
+        ]
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
         if result.returncode:
             message = (result.stderr or result.stdout or 'audio-separator failed').strip()
             raise SeparationError(message[-2000:])
-        return self.register_generated_stems(track, output_dir)
+        stems = self.register_generated_stems(track, output_dir, allowed_types=self.PROFILE_STEMS[profile])
+        if not stems:
+            raise SeparationError('The separator finished but did not produce recognised stem files.')
+        return SeparationResult(profile=profile, model=model, stems=stems)
 
-    def register_generated_stems(self, track, output_dir):
-        stems = []
+    def register_generated_stems(self, track, output_dir, allowed_types=None):
+        stems = {}
         for path in Path(output_dir).iterdir():
-            if not path.is_file() or path.suffix.lower() not in {'.wav', '.mp3', '.flac', '.m4a', '.ogg'}:
+            if not path.is_file() or path.suffix.lower() not in {'.wav', '.mp3', '.flac', '.m4a', '.aac', '.ogg'}:
                 continue
             normalized = path.stem.lower().replace('-', '_').replace(' ', '_')
-            stem_type = next((value for name, value in self.STEM_NAMES.items() if name in normalized), Stem.Type.UNKNOWN)
-            if stem_type == Stem.Type.UNKNOWN:
+            stem_type = self.NORMALIZED_NAMES.get(normalized)
+            if stem_type is None:
+                # Fallback for separator versions that prefix the source filename.
+                stem_type = next((value for name, value in self.NORMALIZED_NAMES.items() if normalized.endswith(f'_{name}') or f'({name})' in normalized), None)
+            if stem_type is None:
+                continue
+            if allowed_types is not None and stem_type not in allowed_types:
                 continue
             relative = path.relative_to(settings.MEDIA_ROOT).as_posix()
             stem, _ = Stem.objects.update_or_create(track=track, type=stem_type, defaults={'file': relative})
-            stems.append(stem)
-        if not stems:
-            raise SeparationError('The separator finished but did not produce recognised stem files.')
+            stems[stem_type] = stem
         return stems
+
+    @classmethod
+    def missing_required_stems(cls, result):
+        return cls.PROFILE_STEMS[result.profile] - result.received_types
+
+    @classmethod
+    def format_stem_types(cls, stem_types):
+        return ', '.join(stem_type.lower() for stem_type in cls.STEM_ORDER if stem_type in stem_types) or 'none'
+
+    @staticmethod
+    def clear_previous_outputs(track):
+        """Remove generated outputs while preserving the source and job history."""
+        for artifact in track.analysis_artifacts.all():
+            artifact.json_file.delete(save=False)
+        track.analysis_artifacts.all().delete()
+        for stem in track.stems.all():
+            stem.file.delete(save=False)
+        track.stems.all().delete()
