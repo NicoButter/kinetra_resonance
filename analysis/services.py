@@ -31,6 +31,55 @@ class IncompleteExperienceError(AnalysisError):
     pass
 
 
+class DrumClassifier:
+    """Conservative descriptor-based classifier; precision is preferred over recall."""
+    confidence_threshold = 0.72
+
+    @staticmethod
+    def descriptors(segment):
+        if len(segment) < 32:
+            return {}
+        windowed = segment * np.hanning(len(segment))
+        spectrum = np.abs(np.fft.rfft(windowed))
+        power = spectrum ** 2
+        frequencies = np.fft.rfftfreq(len(segment), 1 / SAMPLE_RATE)
+        total = float(power.sum()) or 1.0
+        magnitude_total = float(spectrum.sum()) or 1.0
+        first_half = float(np.mean(np.abs(segment[:len(segment) // 2]))) or 1e-12
+        second_half = float(np.mean(np.abs(segment[len(segment) // 2:])))
+        geometric = float(np.exp(np.mean(np.log(spectrum + 1e-12))))
+        arithmetic = float(np.mean(spectrum)) or 1.0
+        return {
+            'lowBandEnergy': clamp(power[frequencies < 220].sum() / total),
+            'midBandEnergy': clamp(power[(frequencies >= 220) & (frequencies < 4000)].sum() / total),
+            'highBandEnergy': clamp(power[frequencies >= 4000].sum() / total),
+            'spectralCentroid': round(float((frequencies * spectrum).sum() / magnitude_total), 2),
+            'spectralFlatness': clamp(geometric / arithmetic),
+            'zeroCrossingRate': clamp(np.mean(np.abs(np.diff(np.signbit(segment))))),
+            'onsetStrength': clamp(np.max(np.abs(segment)) / (np.sqrt(np.mean(segment * segment)) + 1e-12) / 10),
+            'temporalDecay': clamp(1 - min(1.0, second_half / first_half)),
+        }
+
+    def classify(self, segment):
+        features = self.descriptors(segment)
+        if not features:
+            return DrumEventType.UNKNOWN, 0.0, features
+        low, mid, high = features['lowBandEnergy'], features['midBandEnergy'], features['highBandEnergy']
+        candidates = []
+        if low > 0.68 and features['spectralCentroid'] < 1800:
+            candidates.append((DrumEventType.KICK, low))
+        if mid > 0.72 and features['onsetStrength'] > 0.2:
+            candidates.append((DrumEventType.SNARE, mid))
+        if high > 0.78 and features['spectralCentroid'] > 4000:
+            candidates.append((DrumEventType.HI_HAT, high))
+        if not candidates:
+            return DrumEventType.UNKNOWN, clamp(max(low, mid, high) * 0.75), features
+        event_type, confidence = max(candidates, key=lambda item: item[1])
+        if confidence < self.confidence_threshold:
+            event_type = DrumEventType.UNKNOWN
+        return event_type, clamp(confidence), features
+
+
 def clamp(value):
     return round(float(np.clip(value, 0.0, 1.0)), 4)
 
@@ -102,9 +151,11 @@ def pitch_fields(pitch_hz, confidence):
     return {'pitchHz': pitch_hz, 'midi': midi, 'note': note, 'confidence': confidence}
 
 
-def write_payload(processing_job, filename, payload, compact=False):
+def write_payload(processing_job, filename, payload, compact=False, folder='raw'):
     track = processing_job.track
     artifact_dir = Path(settings.MEDIA_ROOT) / 'tracks' / str(track.id) / 'analysis' / str(processing_job.id)
+    if folder:
+        artifact_dir /= folder
     artifact_dir.mkdir(parents=True, exist_ok=True)
     path = artifact_dir / filename
     options = {'ensure_ascii': False}
@@ -125,25 +176,6 @@ class DrumsAnalyzer(BaseAnalyzer):
     stem_name = 'drums'
     filename = 'drums.json'
 
-    @staticmethod
-    def classify_event(segment):
-        if len(segment) < 32:
-            return DrumEventType.UNKNOWN, 0.0
-        spectrum = np.abs(np.fft.rfft(segment * np.hanning(len(segment)))) ** 2
-        frequencies = np.fft.rfftfreq(len(segment), 1 / SAMPLE_RATE)
-        total = float(spectrum.sum()) or 1.0
-        low = float(spectrum[frequencies < 220].sum() / total)
-        mid = float(spectrum[(frequencies >= 220) & (frequencies < 4000)].sum() / total)
-        high = float(spectrum[frequencies >= 4000].sum() / total)
-        candidates = []
-        if low > 0.68: candidates.append((DrumEventType.KICK, low))
-        if mid > 0.72: candidates.append((DrumEventType.SNARE, mid))
-        if high > 0.78: candidates.append((DrumEventType.HI_HAT, high))
-        if not candidates:
-            return DrumEventType.UNKNOWN, clamp(max(low, mid, high) * 0.75)
-        event_type, confidence = max(candidates, key=lambda item: item[1])
-        return (event_type, clamp(confidence)) if confidence >= 0.72 else (DrumEventType.UNKNOWN, clamp(confidence))
-
     def analyze(self, audio_path):
         import essentia.standard as es
         signal = load_audio(audio_path)
@@ -157,8 +189,8 @@ class DrumsAnalyzer(BaseAnalyzer):
             index = min(len(signal), int(time_ms / 1000 * SAMPLE_RATE))
             segment = signal[index:min(index + window, len(signal))]
             strengths.append(float(np.sqrt(np.mean(segment * segment))) if len(segment) else 0.0)
-            event_type, confidence = self.classify_event(segment)
-            events.append({'timeMs': time_ms, 'durationMs': int(round(len(segment) / SAMPLE_RATE * 1000)), 'type': event_type, 'confidence': confidence})
+            event_type, confidence, features = DrumClassifier().classify(segment)
+            events.append({'timeMs': time_ms, 'durationMs': int(round(len(segment) / SAMPLE_RATE * 1000)), 'type': event_type, 'confidence': confidence, 'features': features})
         for event, intensity in zip(events, normalized(strengths)):
             event['intensity'] = clamp(intensity)
         return {'format': 'kinetra-resonance', 'version': ANALYSIS_VERSION, 'stem': self.stem_name, 'durationMs': duration_ms(signal), 'bpm': round(float(bpm), 2), 'confidence': round(float(rhythm_confidence), 3), 'events': sorted(events, key=lambda event: event['timeMs'])}
@@ -276,7 +308,7 @@ class TeleoExperienceBuilder:
     }
 
     def load_artifacts(self, processing_job):
-        artifacts = processing_job.analysis_artifacts.filter(type__in=self.REQUIRED_TYPES)
+        artifacts = processing_job.analysis_artifacts.filter(stage=AnalysisArtifact.Stage.PROCESSED, type__in=self.REQUIRED_TYPES)
         loaded = {}
         for artifact in artifacts:
             with artifact.json_file.open('r') as artifact_file:
@@ -295,24 +327,32 @@ class TeleoExperienceBuilder:
         for artifact_type, channel in ((AnalysisArtifact.Type.BASS, 'bass'), (AnalysisArtifact.Type.GUITAR, 'guitar'), (AnalysisArtifact.Type.PIANO, 'piano')):
             for note in loaded[artifact_type].get('notes', []):
                 payload = {key: note[key] for key in ('midi', 'note', 'endMs') if key in note}
-                timeline.append({'timeMs': int(note['startMs']), 'channel': channel, 'type': 'note', 'intensity': note.get('intensity', 0.0), 'payload': payload})
+                timeline.append({'timeMs': int(note['startMs']), 'channel': channel, 'type': note.get('semanticType', 'note'), 'intensity': note.get('intensity', 0.0), 'payload': payload})
         return sorted(timeline, key=lambda event: (event['timeMs'], event['channel']))
 
     def build(self, processing_job):
         loaded = self.load_artifacts(processing_job)
         track = processing_job.track
         drums = loaded[AnalysisArtifact.Type.DRUMS]
-        timeline = self.build_timeline(loaded)
+        channels_quality = {artifact_type.lower(): loaded[artifact_type].get('quality', {'status': 'unreliable', 'score': 0.0, 'warnings': ['Missing quality validation.'], 'metrics': {}}) for artifact_type in self.REQUIRED_TYPES}
+        safe = {}
+        for artifact_type, payload in loaded.items():
+            collection = 'events' if artifact_type == AnalysisArtifact.Type.DRUMS else 'frames' if artifact_type in {AnalysisArtifact.Type.VOCALS, AnalysisArtifact.Type.OTHER} else 'notes'
+            safe[artifact_type] = dict(payload)
+            safe[artifact_type][collection] = payload.get(collection, []) if channels_quality[artifact_type.lower()]['status'] != 'unreliable' else []
+        timeline = self.build_timeline(safe)
+        drum_events = [{key: event[key] for key in ('timeMs', 'durationMs', 'type', 'intensity', 'confidence') if key in event} for event in safe[AnalysisArtifact.Type.DRUMS].get('events', [])]
         payload = {
             'format': 'teleo-music', 'version': 1,
             'analysis': {'engine': 'kinetra-resonance', 'analysisVersion': ANALYSIS_VERSION},
             'track': {'id': str(track.id), 'title': track.title, 'artist': track.artist, 'durationMs': track.duration_ms or drums.get('durationMs'), 'bpm': drums.get('bpm')},
-            'drums': {'events': drums.get('events', [])},
-            'bass': {'notes': loaded[AnalysisArtifact.Type.BASS].get('notes', [])},
-            'guitar': {'notes': loaded[AnalysisArtifact.Type.GUITAR].get('notes', [])},
-            'piano': {'notes': loaded[AnalysisArtifact.Type.PIANO].get('notes', [])},
-            'vocals': {'frames': loaded[AnalysisArtifact.Type.VOCALS].get('frames', []), 'visemes': []},
-            'other': {'frames': loaded[AnalysisArtifact.Type.OTHER].get('frames', [])},
+            'channelsQuality': channels_quality,
+            'drums': {'events': drum_events},
+            'bass': {'notes': safe[AnalysisArtifact.Type.BASS].get('notes', [])},
+            'guitar': {'notes': safe[AnalysisArtifact.Type.GUITAR].get('notes', [])},
+            'piano': {'notes': safe[AnalysisArtifact.Type.PIANO].get('notes', [])},
+            'vocals': {'frames': safe[AnalysisArtifact.Type.VOCALS].get('frames', []), 'visemes': []},
+            'other': {'frames': safe[AnalysisArtifact.Type.OTHER].get('frames', [])},
             'timeline': timeline, 'lyrics': [], 'sections': [], 'haptics': [],
         }
-        return write_payload(processing_job, 'teleo_experience.json', payload, compact=True)
+        return write_payload(processing_job, 'teleo_experience.json', payload, compact=True, folder='')

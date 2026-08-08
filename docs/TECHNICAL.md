@@ -31,7 +31,7 @@ Usar `.env.example` como referencia. Este MVP no carga automáticamente `.env`; 
 | `tracks.Track` | Audio original, metadatos y espacio de almacenamiento de una canción. |
 | `processing.ProcessingJob` | Perfil, modelo, estado, progreso, etapa y error de un intento de procesamiento. |
 | `tracks.Stem` | Un stem realmente generado y su tipo. Restricción única `(track, type)`. |
-| `analysis.AnalysisArtifact` | Salida versionada de un analizador o del Teleo Experience Builder, vinculada al job productor. |
+| `analysis.AnalysisArtifact` | Salida versionada `RAW`, `PROCESSED` o `FINAL`, vinculada al job productor. |
 
 Todos los identificadores primarios son UUID. `ProcessingJob.track` es una clave foránea: una canción puede conservar varios jobs. Cada artifact tiene una FK obligatoria a su ProcessingJob para impedir que el builder mezcle ejecuciones. Los stems representan la separación vigente; los JSON históricos se conservan por job.
 
@@ -61,6 +61,12 @@ Teleo requiere exactamente los tipos vocals, drums, bass, guitar, piano y other.
 
 Todos los analizadores cargan a 44.1 kHz de forma explícita. Bajo, guitarra y piano usan onsets por flujo espectral y pitch por autocorrelación con umbral de confianza. Vocals y other generan frames temporales normalizados. Consultar `ANALYSIS_PIPELINE.md` para algoritmos y limitaciones.
 
+## Postprocesamiento y calidad
+
+`MusicalPostProcessor` carga únicamente los seis artifacts RAW del job y ejecuta postprocesadores separados. Bass/guitar fusionan segmentos compatibles con thresholds configurables; drums aplica refractory windows por tipo sin reclasificar UNKNOWN; vocals/other suavizan y reducen frames con heartbeat; piano conserva notas y delega la detección patológica al validador.
+
+`QualityValidator` añade a cada artifact procesado `{status, score, warnings, metrics}`. El builder consulta exclusivamente `stage=PROCESSED`. Un canal `unreliable` conserva sus datos procesados para inspección, pero entrega una colección vacía a las estructuras renderizables de Teleo.
+
 ## Rutas
 
 | Ruta | Método | Propósito |
@@ -69,6 +75,7 @@ Todos los analizadores cargan a 44.1 kHz de forma explícita. Bajo, guitarra y p
 | `/tracks/new/` | GET, POST | Carga y creación de job |
 | `/tracks/<uuid>/` | GET | Estado, stems y resultado |
 | `/lab/` | GET | Laboratorio de batería |
+| `/lab/jobs/<job_uuid>/` | GET | Laboratorio RAW/PROCESSED sincronizado con audio |
 | `/api/jobs/<uuid>/status/` | GET | Polling de job |
 | `/api/tracks/` | GET | Lista de tracks |
 | `/api/tracks/<uuid>/` | GET | Track individual |

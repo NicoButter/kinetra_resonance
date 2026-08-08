@@ -1,0 +1,15 @@
+{% extends 'base.html' %}{% load static %}
+{% block title %}Analysis Lab · {{ job.track.title }}{% endblock %}
+{% block content %}
+<section class="section-title"><div><p class="eyebrow">Synchronized Analysis Lab</p><h1>{{ job.track.title }}</h1><p class="muted">{{ job.track.artist|default:'Unknown artist' }} · Job {{ job.id }}</p></div><a class="button secondary" href="{% url 'track-detail' job.track_id %}">Track details</a></section>
+<section class="panel lab-controls">
+  <audio id="lab-audio" controls preload="metadata"></audio>
+  <label>Audio source <select id="audio-source"></select></label>
+  <fieldset><legend>Artifact stage</legend><label><input type="radio" name="artifact-stage" value="raw"> RAW</label><label><input type="radio" name="artifact-stage" value="processed" checked> PROCESSED</label></fieldset>
+  <label>Minimum confidence <output id="confidence-value">0.00</output><input id="confidence-filter" type="range" min="0" max="1" step="0.05" value="0"></label>
+  <p id="lab-counts" class="muted">Loading artifacts…</p>
+</section>
+<section class="panel lab-canvas-wrap"><canvas id="analysis-canvas" aria-label="Synchronized musical analysis"></canvas><div class="lab-legend"><span>−5 s</span><strong>playhead</strong><span>+10 s</span></div></section>
+<section class="lab-bottom"><div class="panel"><h2>Event inspector</h2><pre id="event-inspector">Click an event to inspect it.</pre></div><div class="panel"><h2>Channel quality</h2><div id="quality-panel"></div></div></section>
+{{ lab_config|json_script:"lab-config" }}<script src="{% static 'js/lab.js' %}"></script>
+{% endblock %}

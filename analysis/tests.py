@@ -91,8 +91,11 @@ class TeleoExperienceBuilderTests(TestCase):
         self.track = Track.objects.create(title='Song', artist='Artist', original_filename='song.wav', source_file='tracks/source.wav', file_size=3, duration_ms=1000)
         self.job = ProcessingJob.objects.create(track=self.track)
 
-    def add_artifact(self, job, artifact_type, payload):
-        artifact = AnalysisArtifact(track=self.track, processing_job=job, type=artifact_type, version=1)
+    def add_artifact(self, job, artifact_type, payload, stage=AnalysisArtifact.Stage.PROCESSED):
+        payload = json.loads(json.dumps(payload))
+        if stage == AnalysisArtifact.Stage.PROCESSED:
+            payload.setdefault('quality', {'status': 'reliable', 'score': .9, 'warnings': [], 'metrics': {}})
+        artifact = AnalysisArtifact(track=self.track, processing_job=job, type=artifact_type, stage=stage, version=1)
         artifact.json_file.save(f'{artifact_type.lower()}.json', ContentFile(json.dumps(payload).encode()), save=True)
         return artifact
 

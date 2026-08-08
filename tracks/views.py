@@ -48,7 +48,7 @@ def track_detail(request, track_id):
         (AnalysisArtifact.Type.GUITAR, 'Guitar'), (AnalysisArtifact.Type.PIANO, 'Piano'),
         (AnalysisArtifact.Type.VOCALS, 'Vocals'), (AnalysisArtifact.Type.OTHER, 'Other'),
     )
-    artifacts = {artifact.type: artifact for artifact in job.analysis_artifacts.all()} if job else {}
+    artifacts = {artifact.type: artifact for artifact in job.analysis_artifacts.filter(stage=AnalysisArtifact.Stage.PROCESSED)} if job else {}
     for artifact_type, label in expected:
         artifact = artifacts.get(artifact_type)
         row = {'label': label, 'artifact': artifact, 'status': 'Pending', 'count': 0, 'unit': 'events'}
@@ -61,7 +61,7 @@ def track_detail(request, track_id):
             except (OSError, json.JSONDecodeError):
                 row['status'] = 'Invalid'
         artifact_rows.append(row)
-    experience_artifact = artifacts.get(AnalysisArtifact.Type.TELEO_EXPERIENCE)
+    experience_artifact = job.analysis_artifacts.filter(type=AnalysisArtifact.Type.TELEO_EXPERIENCE, stage=AnalysisArtifact.Stage.FINAL).first() if job else None
     if experience_artifact:
         try:
             with experience_artifact.json_file.open('r') as artifact_file:
@@ -85,7 +85,7 @@ def track_reprocess(request, track_id):
 
 
 def lab(request):
-    artifacts = AnalysisArtifact.objects.filter(type=AnalysisArtifact.Type.DRUMS, processing_job__status=ProcessingJob.Status.COMPLETED).select_related('track').distinct()
+    artifacts = AnalysisArtifact.objects.filter(type=AnalysisArtifact.Type.DRUMS, stage=AnalysisArtifact.Stage.PROCESSED, processing_job__status=ProcessingJob.Status.COMPLETED).select_related('track', 'processing_job').distinct()
     rows = []
     for artifact in artifacts:
         try:
@@ -95,6 +95,21 @@ def lab(request):
         except (OSError, json.JSONDecodeError):
             rows.append({'artifact': artifact, 'bpm': '—', 'beats': '—'})
     return render(request, 'tracks/lab.html', {'rows': rows})
+
+
+def job_lab(request, job_id):
+    job = get_object_or_404(ProcessingJob.objects.select_related('track').prefetch_related('track__stems', 'analysis_artifacts'), id=job_id)
+    audio_sources = [{'key': 'original', 'label': 'Original', 'url': job.track.source_file.url}]
+    stem_order = ('VOCALS', 'DRUMS', 'BASS', 'GUITAR', 'PIANO', 'OTHER')
+    stems = {stem.type: stem for stem in job.track.stems.all()}
+    for stem_type in stem_order:
+        if stem_type in stems:
+            audio_sources.append({'key': stem_type.lower(), 'label': stems[stem_type].get_type_display(), 'url': stems[stem_type].file.url})
+    artifact_urls = {'raw': {}, 'processed': {}}
+    for artifact in job.analysis_artifacts.filter(type__in=('DRUMS', 'BASS', 'GUITAR', 'PIANO', 'VOCALS', 'OTHER')):
+        artifact_urls[artifact.stage.lower()][artifact.type.lower()] = artifact.json_file.url
+    config = {'jobId': str(job.id), 'durationMs': job.track.duration_ms, 'audioSources': audio_sources, 'artifacts': artifact_urls, 'windowBeforeMs': 5000, 'windowAfterMs': 10000}
+    return render(request, 'tracks/job_lab.html', {'job': job, 'lab_config': config})
 
 
 @require_GET

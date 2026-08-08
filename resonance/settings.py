@@ -128,6 +128,23 @@ VOCAL_SEPARATOR_MODEL = os.environ.get('VOCAL_SEPARATOR_MODEL', 'UVR-MDX-NET-Ins
 AUDIO_SEPARATOR_DEFAULT_MODEL = TELEO_SEPARATOR_MODEL
 MAX_UPLOAD_SIZE_MB = int(os.environ.get('MAX_UPLOAD_SIZE_MB', '250'))
 
+# Musical post-processing. Every value can be tuned without changing algorithms.
+BASS_POST_MAX_GAP_MS = int(os.environ.get('BASS_POST_MAX_GAP_MS', '80'))
+BASS_POST_MIN_DURATION_MS = int(os.environ.get('BASS_POST_MIN_DURATION_MS', '60'))
+BASS_POST_MIN_CONFIDENCE = float(os.environ.get('BASS_POST_MIN_CONFIDENCE', '0.50'))
+GUITAR_POST_MAX_GAP_MS = int(os.environ.get('GUITAR_POST_MAX_GAP_MS', '60'))
+GUITAR_POST_MIN_DURATION_MS = int(os.environ.get('GUITAR_POST_MIN_DURATION_MS', '45'))
+GUITAR_POST_MIN_CONFIDENCE = float(os.environ.get('GUITAR_POST_MIN_CONFIDENCE', '0.50'))
+PITCH_MERGE_TOLERANCE_CENTS = float(os.environ.get('PITCH_MERGE_TOLERANCE_CENTS', '50'))
+POSTPROCESS_INTENSITY_MODE = os.environ.get('POSTPROCESS_INTENSITY_MODE', 'max')
+VOCALS_POST_HEARTBEAT_MS = int(os.environ.get('VOCALS_POST_HEARTBEAT_MS', '200'))
+OTHER_POST_HEARTBEAT_MS = int(os.environ.get('OTHER_POST_HEARTBEAT_MS', '200'))
+DRUM_REFRACTORY_KICK_MS = int(os.environ.get('DRUM_REFRACTORY_KICK_MS', '90'))
+DRUM_REFRACTORY_SNARE_MS = int(os.environ.get('DRUM_REFRACTORY_SNARE_MS', '70'))
+DRUM_REFRACTORY_HI_HAT_MS = int(os.environ.get('DRUM_REFRACTORY_HI_HAT_MS', '35'))
+DRUM_REFRACTORY_CRASH_MS = int(os.environ.get('DRUM_REFRACTORY_CRASH_MS', '150'))
+DRUM_REFRACTORY_CYMBAL_MS = int(os.environ.get('DRUM_REFRACTORY_CYMBAL_MS', '120'))
+
 
 # Email
 # https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration

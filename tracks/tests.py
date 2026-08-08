@@ -44,8 +44,15 @@ class TrackTests(TestCase):
         track = self.make_track(); Stem.objects.create(track=track, type=Stem.Type.DRUMS, file='tracks/x/stems/drums.wav')
         self.assertEqual(self.client.get(reverse('stems-api', args=[track.id])).json()['stems'][0]['type'], 'DRUMS')
     def test_detail_exposes_all_analyzers_and_teleo_experience(self):
-        track = self.make_track(); ProcessingJob.objects.create(track=track)
+        track = self.make_track(); job = ProcessingJob.objects.create(track=track)
         response = self.client.get(reverse('track-detail', args=[track.id]))
         self.assertContains(response, 'Analysis artifacts')
         for label in ('Drums', 'Bass', 'Guitar', 'Piano', 'Vocals', 'Other', 'TELEO EXPERIENCE'):
             self.assertContains(response, label)
+        self.assertContains(response, reverse('job-lab', args=[job.id]))
+    def test_job_lab_uses_single_audio_clock_and_canvas(self):
+        track = self.make_track(); job = ProcessingJob.objects.create(track=track)
+        response = self.client.get(reverse('job-lab', args=[job.id]))
+        self.assertContains(response, 'id="lab-audio"')
+        self.assertContains(response, 'id="analysis-canvas"')
+        self.assertContains(response, 'Minimum confidence')

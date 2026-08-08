@@ -11,7 +11,13 @@ Vocals / Drums / Bass / Guitar / Piano / Other
       ↓
 Per-stem analyzers
       ↓
-drums.json / bass.json / guitar.json / piano.json / vocals.json / other.json
+RAW artifacts (inmutables)
+      ↓
+MusicalPostProcessor
+      ↓
+PROCESSED artifacts
+      ↓
+QualityValidator
       ↓
 TeleoExperienceBuilder
       ↓
@@ -33,7 +39,7 @@ Los timestamps y duraciones son enteros en milisegundos. Los valores normalizado
 
 ## Teleo Experience schema v1
 
-El builder solo lee `AnalysisArtifact` relacionados con el ProcessingJob actual y exige `DRUMS`, `BASS`, `GUITAR`, `PIANO`, `VOCALS` y `OTHER`. Si falta alguno, no genera una experiencia completa y el job termina en `INCOMPLETE`.
+El builder solo lee `AnalysisArtifact(stage=PROCESSED)` relacionados con el ProcessingJob actual y exige `DRUMS`, `BASS`, `GUITAR`, `PIANO`, `VOCALS` y `OTHER`. Si falta alguno, no genera una experiencia completa y el job termina en `INCOMPLETE`.
 
 La experiencia incluye metadatos del track, eventos/notas/frames por canal y los arrays futuros `visemes`, `lyrics`, `sections` y `haptics`, inicialmente vacíos. No se genera contenido ficticio.
 
@@ -43,9 +49,18 @@ Los artifacts se almacenan en:
 
 ```text
 media/tracks/<track_uuid>/analysis/<job_uuid>/
+├── raw/
+├── processed/
+└── teleo_experience.json
 ```
 
 Esto conserva resultados históricos y evita contaminación entre reprocesamientos.
+
+Cada processed artifact contiene un bloque `quality`. Teleo Experience expone esos bloques en `channelsQuality`; los eventos de canales `unreliable` no entran en las colecciones de render ni en la timeline.
+
+## Analysis Lab
+
+`/lab/jobs/<job_uuid>/` carga original, stems y ambos niveles de artifacts. El tiempo proviene exclusivamente de `audio.currentTime`; el Canvas se actualiza con `requestAnimationFrame`. Cada frame visual consulta solo la ventana −5/+10 segundos mediante búsqueda binaria sobre colecciones ordenadas. El control de confianza es visual y nunca reescribe datos.
 
 ## Estados y errores
 

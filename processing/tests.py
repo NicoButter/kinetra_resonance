@@ -75,9 +75,11 @@ class ProcessingCommandTests(TestCase):
 
     @patch('processing.services.StemSeparationService.clear_previous_outputs')
     @patch('analysis.services.TeleoExperienceBuilder.build')
+    @patch('analysis.postprocessing.QualityValidator.validate')
+    @patch('analysis.postprocessing.MusicalPostProcessor.process')
     @patch('analysis.services.BaseAnalyzer.write')
     @patch('processing.services.StemSeparationService.separate')
-    def test_job_completes_with_six_stems_and_analysis(self, separate, analyze, build, clear):
+    def test_job_completes_with_six_stems_and_analysis(self, separate, analyze, postprocess, validate, build, clear):
         job = self.make_job()
         stems = {stem_type: Stem.objects.create(track=job.track, type=stem_type, file=f'tracks/{job.track_id}/stems/{stem_type.lower()}.wav') for stem_type in StemSeparationService.PROFILE_STEMS[job.profile]}
         separate.return_value = SeparationResult(job.profile, job.separator_model, stems)

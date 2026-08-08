@@ -11,6 +11,7 @@
   <p id="stage">{{ job.current_stage }} · {{ job.progress }}%</p>
   <p class="muted">{{ job.get_profile_display }} · {{ job.separator_model }}</p>
   <p id="error" class="error">{{ job.error_message }}</p>
+  <a class="button secondary" href="{% url 'job-lab' job.id %}">Open Analysis Lab</a>
 </section>
 {% endif %}
 <section>

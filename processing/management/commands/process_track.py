@@ -5,6 +5,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
 from analysis.models import AnalysisArtifact
+from analysis.postprocessing import MusicalPostProcessor, QualityValidator
 from analysis.services import (
     BassAnalyzer, DrumsAnalyzer, GuitarAnalyzer, IncompleteExperienceError,
     OtherAnalyzer, PianoAnalyzer, TeleoExperienceBuilder, VocalsAnalyzer,
@@ -33,10 +34,10 @@ class Command(BaseCommand):
         parser.add_argument('job_uuid')
 
     @staticmethod
-    def register_artifact(job, stem, artifact_type, path):
+    def register_artifact(job, stem, artifact_type, path, stage=AnalysisArtifact.Stage.RAW):
         relative = path.relative_to(settings.MEDIA_ROOT).as_posix()
         return AnalysisArtifact.objects.update_or_create(
-            processing_job=job, type=artifact_type, version=1,
+            processing_job=job, type=artifact_type, stage=stage, version=1,
             defaults={'track': job.track, 'stem': stem, 'json_file': relative},
         )[0]
 
@@ -89,18 +90,30 @@ class Command(BaseCommand):
                 job.progress = progress
                 job.save(update_fields=['status', 'current_stage', 'progress'])
                 payload, path = analyzer_class().write(job, stem)
-                self.register_artifact(job, stem, artifact_type, path)
+                self.register_artifact(job, stem, artifact_type, path, AnalysisArtifact.Stage.RAW)
                 if stem_type == Stem.Type.DRUMS:
                     track.duration_ms = payload['durationMs']
                     track.save(update_fields=['duration_ms', 'updated_at'])
 
             if job.profile == ProcessingProfile.TELEO_6_STEM:
-                current_analyzer = 'TeleoExperienceBuilder'
-                job.current_stage = 'Building Teleo Experience'
+                current_analyzer = 'MusicalPostProcessor'
+                job.current_stage = 'Post-processing musical events'
+                job.progress = 94
+                job.save(update_fields=['current_stage', 'progress'])
+                MusicalPostProcessor().process(job)
+
+                current_analyzer = 'QualityValidator'
+                job.current_stage = 'Validating analysis quality'
                 job.progress = 97
                 job.save(update_fields=['current_stage', 'progress'])
+                QualityValidator().validate(job)
+
+                current_analyzer = 'TeleoExperienceBuilder'
+                job.current_stage = 'Building Teleo Experience'
+                job.progress = 99
+                job.save(update_fields=['current_stage', 'progress'])
                 _, path = TeleoExperienceBuilder().build(job)
-                self.register_artifact(job, None, AnalysisArtifact.Type.TELEO_EXPERIENCE, path)
+                self.register_artifact(job, None, AnalysisArtifact.Type.TELEO_EXPERIENCE, path, AnalysisArtifact.Stage.FINAL)
 
             job.status = ProcessingJob.Status.COMPLETED
             job.progress = 100

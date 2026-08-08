@@ -33,7 +33,9 @@ El repositorio contiene un MVP Django local funcional con:
 - comando `python manage.py process_track <job_uuid>`;
 - separación con la CLI de `audio-separator`;
 - registro únicamente de stems efectivamente producidos;
-- analizadores separados para drums, bass, guitar, piano, vocals y other;
+- analizadores RAW separados para drums, bass, guitar, piano, vocals y other;
+- `MusicalPostProcessor` y postprocesadores por canal que generan artifacts PROCESSED sin alterar RAW;
+- `QualityValidator` con estado, score, warnings y metrics por canal;
 - artifacts JSON asociados obligatoriamente al ProcessingJob productor;
 - `TeleoExperienceBuilder` que valida los seis artifacts y genera `teleo_experience.json`;
 - polling de estado en `/api/jobs/<uuid>/status/`;
@@ -61,7 +63,7 @@ No se usa Celery, Redis, PostgreSQL, Docker, DRF ni WebSockets por ahora. SQLite
 media/tracks/<track_uuid>/
 ├── source/original.<ext>
 ├── stems/<tipo>.<ext>
-└── analysis/<job_uuid>/{drums,bass,guitar,piano,vocals,other,teleo_experience}.json
+└── analysis/<job_uuid>/{raw/,processed/,teleo_experience.json}
 ```
 
 Los nombres de directorio no dependen del título. La carga restringe extensiones y tamaño; `MAX_UPLOAD_SIZE_MB` vale 250 por defecto.
@@ -72,8 +74,10 @@ Los nombres de directorio no dependen del título. La carga restringe extensione
 2. `SEPARATING`: ejecuta `audio-separator` sin shell, con modelo, directorio, WAV y nombres de salida explícitos.
 3. Detecta nombres de stem reconocibles: vocals, drums, bass, guitar, piano, other e instrumental.
 4. En Teleo valida obligatoriamente los seis tipos; si falta alguno finaliza en `INCOMPLETE`.
-5. `ANALYZING`: ejecuta secuencialmente los seis analizadores y registra cada artifact para el job actual.
-6. `BUILDING`: valida el conjunto y genera `teleo_experience.json`; solo entonces finaliza en `COMPLETED`.
+5. `ANALYZING`: ejecuta los seis analizadores y registra artifacts RAW.
+6. `POSTPROCESSING`: genera artifacts PROCESSED sin sobrescribir RAW.
+7. `QUALITY`: valida cada canal.
+8. `BUILDING`: usa exclusivamente PROCESSED y genera `teleo_experience.json`.
 
 El perfil predeterminado es `TELEO_6_STEM`, con `htdemucs_6s.yaml`. `VOCAL_EXTRACTION` conserva la salida vocals/instrumental con `UVR-MDX-NET-Inst_HQ_4.onnx`. Ambos modelos son configurables por entorno. No se debe suponer GPU disponible.
 
