@@ -2,6 +2,7 @@ import json
 import os
 
 from django.conf import settings
+from django.contrib import messages
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -14,7 +15,7 @@ from processing.models import ProcessingJob
 from processing.services import StemSeparationService
 from .forms import ReprocessTrackForm, TrackUploadForm
 from .models import Track
-from .services import launch_processing
+from .services import delete_track_and_files, launch_processing
 
 
 def home(request):
@@ -83,7 +84,13 @@ def track_detail(request, track_id):
                 reviewed_experience = {'artifact': reviewed_artifact, 'version': reviewed_artifact.version, 'reviewed_at': reviewed_payload.get('review', {}).get('reviewedAt'), 'file_size': reviewed_artifact.json_file.size}
             except (OSError, json.JSONDecodeError):
                 pass
-    return render(request, 'tracks/track_detail.html', {'track': track, 'job': job, 'artifact_rows': artifact_rows, 'experience': experience, 'reviewed_experience': reviewed_experience, 'reprocess_form': ReprocessTrackForm()})
+    can_delete = not job or job.status in {
+        ProcessingJob.Status.COMPLETED,
+        ProcessingJob.Status.INCOMPLETE,
+        ProcessingJob.Status.FAILED,
+        ProcessingJob.Status.CANCELLED,
+    }
+    return render(request, 'tracks/track_detail.html', {'track': track, 'job': job, 'artifact_rows': artifact_rows, 'experience': experience, 'reviewed_experience': reviewed_experience, 'reprocess_form': ReprocessTrackForm(), 'can_delete': can_delete})
 
 
 @require_POST
@@ -96,6 +103,23 @@ def track_reprocess(request, track_id):
         job = ProcessingJob.objects.create(track=track, profile=profile, separator_model=model)
         launch_processing(job.id)
     return redirect('track-detail', track_id=track.id)
+
+
+@require_POST
+def track_delete(request, track_id):
+    track = get_object_or_404(Track.objects.prefetch_related('analysis_artifacts', 'stems', 'processing_jobs'), id=track_id)
+    active_job = next((job for job in track.processing_jobs.all() if job.status not in {
+        ProcessingJob.Status.COMPLETED,
+        ProcessingJob.Status.INCOMPLETE,
+        ProcessingJob.Status.FAILED,
+        ProcessingJob.Status.CANCELLED,
+    }), None)
+    if active_job:
+        messages.error(request, 'This track cannot be deleted while it is being processed.')
+        return redirect('track-detail', track_id=track.id)
+    delete_track_and_files(track)
+    messages.success(request, 'The processed track and its associated files were deleted.')
+    return redirect('home')
 
 
 def lab(request):

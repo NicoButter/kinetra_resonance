@@ -6,6 +6,7 @@ urlpatterns = [
     path('tracks/new/', views.track_create, name='track-create'),
     path('tracks/<uuid:track_id>/', views.track_detail, name='track-detail'),
     path('tracks/<uuid:track_id>/reprocess/', views.track_reprocess, name='track-reprocess'),
+    path('tracks/<uuid:track_id>/delete/', views.track_delete, name='track-delete'),
     path('lab/', views.lab, name='lab'),
     path('lab/jobs/<uuid:job_id>/', views.job_lab, name='job-lab'),
     path('review/jobs/<uuid:job_id>/', views.review_editor, name='review-editor'),

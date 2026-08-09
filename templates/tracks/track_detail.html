@@ -2,7 +2,7 @@
 {% block content %}
 <section class="section-title">
   <div><p class="eyebrow">Track</p><h1>{{ track.title }}</h1><p class="muted">{{ track.artist|default:'Unknown artist' }} · {{ track.file_size }} bytes · {{ track.duration_ms|default:'—' }} ms</p></div>
-  <a class="button secondary" href="{{ track.source_file.url }}" download>Original audio</a>
+  <div class="track-actions"><a class="button secondary" href="{{ track.source_file.url }}" download>Original audio</a>{% if can_delete %}<form action="{% url 'track-delete' track.id %}" method="post" onsubmit="return confirm('Delete this processed track and all of its associated files? This cannot be undone.');">{% csrf_token %}<button class="button danger" type="submit">Delete processed track</button></form>{% else %}<small class="muted">Deletion is available when processing finishes.</small>{% endif %}</div>
 </section>
 {% if job %}
 <section class="panel" id="job" data-job="{{ job.id }}">

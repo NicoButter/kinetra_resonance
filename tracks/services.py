@@ -1,6 +1,5 @@
 import subprocess
 import sys
-from pathlib import Path
 
 from django.conf import settings
 
@@ -14,3 +13,16 @@ def launch_processing(job_id):
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
+
+
+def delete_track_and_files(track):
+    """Remove a catalogued track together with every file it owns."""
+    artifacts = list(track.analysis_artifacts.all())
+    stems = list(track.stems.all())
+
+    for artifact in artifacts:
+        artifact.json_file.delete(save=False)
+    for stem in stems:
+        stem.file.delete(save=False)
+    track.source_file.delete(save=False)
+    track.delete()

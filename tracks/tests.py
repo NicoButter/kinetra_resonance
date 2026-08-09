@@ -1,11 +1,19 @@
 from unittest.mock import patch
+from pathlib import Path
+from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
+from analysis.models import AnalysisArtifact
 from processing.models import ProcessingJob, ProcessingProfile
 from .forms import TrackUploadForm
 from .models import Stem, Track, track_source_path
 
+
+TEST_MEDIA = Path('/tmp/kinetra-track-tests')
+
+
+@override_settings(MEDIA_ROOT=TEST_MEDIA)
 class TrackTests(TestCase):
     def make_track(self):
         track = Track.objects.create(title='A safe title', original_filename='song.wav', file_size=3)
@@ -56,3 +64,29 @@ class TrackTests(TestCase):
         self.assertContains(response, 'id="lab-audio"')
         self.assertContains(response, 'id="analysis-canvas"')
         self.assertContains(response, 'Minimum confidence')
+
+    def test_delete_removes_track_from_catalog_and_all_owned_files(self):
+        track = self.make_track()
+        job = ProcessingJob.objects.create(track=track, status=ProcessingJob.Status.COMPLETED)
+        stem = Stem.objects.create(track=track, type=Stem.Type.DRUMS)
+        stem.file.save('drums.wav', ContentFile(b'stem'), save=True)
+        artifact = AnalysisArtifact.objects.create(track=track, processing_job=job, type=AnalysisArtifact.Type.DRUMS)
+        artifact.json_file.save('drums.json', ContentFile(b'{}'), save=True)
+        source_name, stem_name, artifact_name = track.source_file.name, stem.file.name, artifact.json_file.name
+
+        response = self.client.post(reverse('track-delete', args=[track.id]))
+
+        self.assertRedirects(response, reverse('home'))
+        self.assertFalse(Track.objects.filter(id=track.id).exists())
+        self.assertFalse(ProcessingJob.objects.filter(id=job.id).exists())
+        for name in (source_name, stem_name, artifact_name):
+            self.assertFalse(track.source_file.storage.exists(name))
+
+    def test_delete_is_unavailable_while_a_job_is_active(self):
+        track = self.make_track()
+        ProcessingJob.objects.create(track=track, status=ProcessingJob.Status.ANALYZING)
+
+        response = self.client.post(reverse('track-delete', args=[track.id]))
+
+        self.assertRedirects(response, reverse('track-detail', args=[track.id]))
+        self.assertTrue(Track.objects.filter(id=track.id).exists())
