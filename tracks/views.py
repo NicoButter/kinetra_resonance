@@ -6,7 +6,7 @@ from django.contrib import messages
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
 from django.views.decorators.csrf import ensure_csrf_cookie
 
 from analysis.models import AnalysisArtifact, ReviewSession
@@ -15,7 +15,7 @@ from processing.models import ProcessingJob
 from processing.services import StemSeparationService
 from .forms import ReprocessTrackForm, TrackUploadForm
 from .models import Track
-from .services import delete_track_and_files, launch_processing
+from .services import TrackDeletionError, TrackDeletionService, launch_processing
 
 
 def home(request):
@@ -90,7 +90,8 @@ def track_detail(request, track_id):
         ProcessingJob.Status.FAILED,
         ProcessingJob.Status.CANCELLED,
     }
-    return render(request, 'tracks/track_detail.html', {'track': track, 'job': job, 'artifact_rows': artifact_rows, 'experience': experience, 'reviewed_experience': reviewed_experience, 'reprocess_form': ReprocessTrackForm(), 'can_delete': can_delete})
+    drum_transcription = (job.metadata or {}).get('drumTranscription') if job else None
+    return render(request, 'tracks/track_detail.html', {'track': track, 'job': job, 'artifact_rows': artifact_rows, 'experience': experience, 'reviewed_experience': reviewed_experience, 'drum_transcription': drum_transcription, 'reprocess_form': ReprocessTrackForm(), 'can_delete': can_delete})
 
 
 @require_POST
@@ -105,7 +106,7 @@ def track_reprocess(request, track_id):
     return redirect('track-detail', track_id=track.id)
 
 
-@require_POST
+@require_http_methods(['GET', 'POST'])
 def track_delete(request, track_id):
     track = get_object_or_404(Track.objects.prefetch_related('analysis_artifacts', 'stems', 'processing_jobs'), id=track_id)
     active_job = next((job for job in track.processing_jobs.all() if job.status not in {
@@ -117,8 +118,16 @@ def track_delete(request, track_id):
     if active_job:
         messages.error(request, 'This track cannot be deleted while it is being processed.')
         return redirect('track-detail', track_id=track.id)
-    delete_track_and_files(track)
-    messages.success(request, 'The processed track and its associated files were deleted.')
+
+    if request.method == 'GET':
+        return render(request, 'tracks/track_delete_confirm.html', {'track': track})
+
+    try:
+        TrackDeletionService().delete(track)
+    except TrackDeletionError:
+        messages.error(request, 'The track could not be deleted safely.')
+        return redirect('track-detail', track_id=track.id)
+    messages.success(request, 'Track deleted successfully.')
     return redirect('home')
 
 
@@ -191,7 +200,7 @@ def review_editor(request, job_id):
 @require_GET
 def job_status(request, job_id):
     job = get_object_or_404(ProcessingJob, id=job_id)
-    return JsonResponse({'id': str(job.id), 'status': job.status, 'progress': job.progress, 'currentStage': job.current_stage, 'errorMessage': job.error_message, 'profile': job.profile, 'separatorModel': job.separator_model})
+    return JsonResponse({'id': str(job.id), 'status': job.status, 'progress': job.progress, 'currentStage': job.current_stage, 'errorMessage': job.error_message, 'profile': job.profile, 'separatorModel': job.separator_model, 'metadata': job.metadata})
 
 
 def serialize_track(track):

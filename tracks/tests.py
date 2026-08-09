@@ -4,10 +4,11 @@ from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
-from analysis.models import AnalysisArtifact
+from analysis.models import AnalysisArtifact, ReviewAction, ReviewSession
 from processing.models import ProcessingJob, ProcessingProfile
 from .forms import TrackUploadForm
 from .models import Stem, Track, track_source_path
+from .services import TrackDeletionError, TrackDeletionService
 
 
 TEST_MEDIA = Path('/tmp/kinetra-track-tests')
@@ -46,8 +47,10 @@ class TrackTests(TestCase):
         self.assertEqual(track.processing_jobs.count(), 2)
         self.assertTrue(track.source_file.storage.exists(track.source_file.name))
     def test_status_endpoint(self):
-        track = self.make_track(); job = ProcessingJob.objects.create(track=track)
-        self.assertEqual(self.client.get(reverse('job-status', args=[job.id])).json()['status'], 'PENDING')
+        track = self.make_track(); job = ProcessingJob.objects.create(track=track, metadata={'drumTranscription': {'backend': 'adtof'}})
+        payload = self.client.get(reverse('job-status', args=[job.id])).json()
+        self.assertEqual(payload['status'], 'PENDING')
+        self.assertEqual(payload['metadata']['drumTranscription']['backend'], 'adtof')
     def test_stem_api(self):
         track = self.make_track(); Stem.objects.create(track=track, type=Stem.Type.DRUMS, file='tracks/x/stems/drums.wav')
         self.assertEqual(self.client.get(reverse('stems-api', args=[track.id])).json()['stems'][0]['type'], 'DRUMS')
@@ -65,22 +68,96 @@ class TrackTests(TestCase):
         self.assertContains(response, 'id="analysis-canvas"')
         self.assertContains(response, 'Minimum confidence')
 
-    def test_delete_removes_track_from_catalog_and_all_owned_files(self):
+    def test_delete_removes_complete_track_aggregate_and_its_media_directory(self):
         track = self.make_track()
+        other_track = self.make_track()
         job = ProcessingJob.objects.create(track=track, status=ProcessingJob.Status.COMPLETED)
+        second_job = ProcessingJob.objects.create(track=track, status=ProcessingJob.Status.COMPLETED)
+        other_job = ProcessingJob.objects.create(track=other_track, status=ProcessingJob.Status.COMPLETED)
         stem = Stem.objects.create(track=track, type=Stem.Type.DRUMS)
         stem.file.save('drums.wav', ContentFile(b'stem'), save=True)
         artifact = AnalysisArtifact.objects.create(track=track, processing_job=job, type=AnalysisArtifact.Type.DRUMS)
         artifact.json_file.save('drums.json', ContentFile(b'{}'), save=True)
-        source_name, stem_name, artifact_name = track.source_file.name, stem.file.name, artifact.json_file.name
+        second_artifact = AnalysisArtifact.objects.create(track=track, processing_job=second_job, type=AnalysisArtifact.Type.BASS)
+        second_artifact.json_file.save('bass.json', ContentFile(b'{}'), save=True)
+        other_stem = Stem.objects.create(track=other_track, type=Stem.Type.DRUMS)
+        other_stem.file.save('drums.wav', ContentFile(b'other stem'), save=True)
+        other_artifact = AnalysisArtifact.objects.create(track=other_track, processing_job=other_job, type=AnalysisArtifact.Type.DRUMS)
+        other_artifact.json_file.save('drums.json', ContentFile(b'{}'), save=True)
+        session = ReviewSession.objects.create(processing_job=job)
+        parent = ReviewAction.objects.create(review_session=session, channel='drums', action_type='ASSIGN_DRUM_PIECE', event_id='drums-000001', payload={}, sequence=1)
+        child = ReviewAction.objects.create(review_session=session, parent=parent, channel='drums', action_type='CONFIRM_DRUM_PIECE', event_id='drums-000001', payload={}, sequence=2)
+        session.cursor_action = child
+        session.save(update_fields=['cursor_action'])
+        second_session = ReviewSession.objects.create(processing_job=second_job)
+        ReviewAction.objects.create(review_session=second_session, channel='drums', action_type='DELETE', event_id='drums-000002', payload={}, sequence=1)
+        track_directory = TEST_MEDIA / 'tracks' / str(track.id)
+        intermediate = track_directory / 'analysis' / str(job.id) / 'intermediate' / 'drums_adtof.mid'
+        intermediate.parent.mkdir(parents=True, exist_ok=True)
+        intermediate.write_bytes(b'MThd')
+        other_directory = TEST_MEDIA / 'tracks' / str(other_track.id)
 
-        response = self.client.post(reverse('track-delete', args=[track.id]))
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(reverse('track-delete', args=[track.id]))
 
         self.assertRedirects(response, reverse('home'))
         self.assertFalse(Track.objects.filter(id=track.id).exists())
-        self.assertFalse(ProcessingJob.objects.filter(id=job.id).exists())
-        for name in (source_name, stem_name, artifact_name):
-            self.assertFalse(track.source_file.storage.exists(name))
+        self.assertFalse(ProcessingJob.objects.filter(track_id=track.id).exists())
+        self.assertFalse(Stem.objects.filter(track_id=track.id).exists())
+        self.assertFalse(AnalysisArtifact.objects.filter(track_id=track.id).exists())
+        self.assertFalse(ReviewSession.objects.filter(processing_job__track_id=track.id).exists())
+        self.assertFalse(ReviewAction.objects.filter(review_session__processing_job__track_id=track.id).exists())
+        self.assertFalse(track_directory.exists())
+        self.assertTrue(Track.objects.filter(id=other_track.id).exists())
+        self.assertTrue(ProcessingJob.objects.filter(id=other_job.id).exists())
+        self.assertTrue(other_directory.exists())
+        self.assertTrue(other_stem.file.storage.exists(other_stem.file.name))
+        self.assertTrue(other_artifact.json_file.storage.exists(other_artifact.json_file.name))
+
+    def test_delete_confirmation_get_never_deletes_and_post_is_required_for_mutation(self):
+        track = self.make_track()
+
+        response = self.client.get(reverse('track-delete', args=[track.id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Delete track?')
+        self.assertContains(response, 'Delete permanently')
+        self.assertTrue(Track.objects.filter(id=track.id).exists())
+
+    def test_delete_nonexistent_track_returns_404(self):
+        import uuid
+
+        self.assertEqual(self.client.post(reverse('track-delete', args=[uuid.uuid4()])).status_code, 404)
+
+    def test_track_deletion_service_refuses_a_resolved_directory_outside_media_root(self):
+        import tempfile
+
+        track = Track.objects.create(title='Unsafe target', original_filename='song.wav', file_size=0)
+        link = TEST_MEDIA / 'tracks' / str(track.id)
+        link.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory() as outside:
+            # A malicious filesystem symlink must not turn a UUID-derived
+            # directory into a deletion target outside MEDIA_ROOT.
+            link.symlink_to(outside, target_is_directory=True)
+
+            with self.assertRaises(TrackDeletionError):
+                TrackDeletionService().media_directory(track)
+
+            self.assertTrue(Path(outside).exists())
+
+    @patch('tracks.services.shutil.rmtree', side_effect=OSError('filesystem busy'))
+    def test_filesystem_cleanup_failure_is_logged_after_database_commit(self, remove_tree):
+        track = self.make_track()
+        track_directory = TEST_MEDIA / 'tracks' / str(track.id)
+
+        with self.assertLogs('tracks.services', level='ERROR'):
+            with self.captureOnCommitCallbacks(execute=True):
+                response = self.client.post(reverse('track-delete', args=[track.id]))
+
+        self.assertRedirects(response, reverse('home'))
+        self.assertFalse(Track.objects.filter(id=track.id).exists())
+        self.assertTrue(track_directory.exists())
+        remove_tree.assert_called_once()
 
     def test_delete_is_unavailable_while_a_job_is_active(self):
         track = self.make_track()

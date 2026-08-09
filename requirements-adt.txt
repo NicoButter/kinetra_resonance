@@ -1,0 +1,7 @@
+# Optional experimental backend. Keep separate from the core application.
+# Upstream currently ships no explicit repository license and bundles model
+# weights; review code/model licensing before any commercial distribution.
+adtof-pytorch @ git+https://github.com/xavriley/ADTOF-pytorch.git@85c192e78f716ea0b111cc8a5ee4a8f6a3a4f8a9
+pretty_midi==0.2.11.post0
+mido==1.3.3
+importlib_resources==7.1.0

@@ -58,6 +58,7 @@ class Command(BaseCommand):
             job.current_stage = 'Preparing workspace'
             job.started_at = timezone.now()
             job.error_message = ''
+            job.metadata = {}
             job.save()
 
             separator.clear_previous_outputs(track, job)
@@ -94,6 +95,10 @@ class Command(BaseCommand):
                 if stem_type == Stem.Type.DRUMS:
                     track.duration_ms = payload['durationMs']
                     track.save(update_fields=['duration_ms', 'updated_at'])
+                    job.metadata = {**job.metadata, 'drumTranscription': payload.get('transcription', {})}
+                    job.save(update_fields=['metadata'])
+                    for warning in payload.get('transcription', {}).get('warnings', []):
+                        logger.warning('Job %s drum transcription: %s', job.id, warning)
 
             if job.profile == ProcessingProfile.TELEO_6_STEM:
                 current_analyzer = 'MusicalPostProcessor'

@@ -19,7 +19,8 @@ Eventos nuevos usan IDs `manual-<channel>-<uuid>`. Los postprocesos nuevos asign
 
 - `DELETE`, `ADD`, `RELABEL`, `ASSIGN_DRUM_PIECE`, `MOVE`, `RESIZE`.
 - `CHANGE_INTENSITY`, `CHANGE_PITCH`, `MERGE`, `SPLIT`.
-- `CONFIRM` guarda `reviewMetadata.confirmedByHuman`.
+- `CONFIRM` guarda `reviewMetadata.confirmedByHuman` para canales generales.
+- `CONFIRM_DRUM_PIECE` confirma explícitamente una sugerencia automática y guarda `confirmedAutomaticByHuman`.
 - `MARK_RANGE` registra voz activa/silencio/sospechoso o rangos other unreliable/exclude/energy multiplier.
 
 El backend valida canal, pertenencia al job, existencia de event ID, duración del track, intensidad `[0,1]`, MIDI `[0,127]`, tipos de drum y compatibilidad temporal/MIDI para merge. Una asignación masiva conserva una acción por evento y comparte `batch_id`; Undo/Redo mueve todo el batch como una unidad.
@@ -34,14 +35,14 @@ Cada detección conserva dos verdades separadas:
 {
   "id": "drums-000193",
   "timeMs": 84230,
-  "detectedType": "kick",
-  "detectedConfidence": 0.73,
+  "automaticType": "kick",
+  "automatic": {"backend": "adtof", "type": "kick", "confidence": null},
   "reviewedType": null,
   "effectiveType": "kick"
 }
 ```
 
-`detectedType` es la sugerencia inmutable de la IA. `reviewedType` es la decisión humana. Todos los hits sin decisión humana se muestran en `UNASSIGNED`, aunque `effectiveType` pueda usar la predicción como fallback. `UNKNOWN` significa que el humano sí auditó el golpe pero no pudo identificarlo.
+`automaticType` es la familia propuesta; `automatic` conserva backend y evidencia disponible. ADTOF no entrega confidence por evento, por lo que queda `null`: la velocidad MIDI nunca se usa como confidence. `reviewedType` es la decisión humana. En HUMAN REVIEW VIEW todos los hits sin decisión humana se muestran en `UNASSIGNED`, aunque `effectiveType` pueda usar la propuesta como fallback. `UNKNOWN` significa que el golpe no pudo identificarse.
 
 Los tipos admitidos son `UNASSIGNED`, `KICK`, `SNARE`, `HI_HAT`, `TOM`, `CRASH`, `SPLASH`, `RIDE`, `CYMBAL` y `UNKNOWN`.
 
@@ -61,6 +62,7 @@ La barra **Full track navigation** permite recorrer la canción completa con pas
 | ← / → | ±100 ms |
 | Shift+← / Shift+→ | ±1000 ms |
 | A | Audition del hit seleccionado |
+| Enter | Confirmar la sugerencia automática seleccionada |
 | K/S/H/T | Asignar Kick/Snare/Hi-hat/Tom |
 | C/P/R/Y | Asignar Crash/Splash/Ride/Cymbal |
 | U/N | Asignar Unassigned/Unknown |
@@ -85,7 +87,7 @@ analysis/<job_uuid>/reviewed/v<review_version>/
 
 Luego genera `teleo_experience.reviewed.json` con metadata `status`, `reviewVersion`, `sourceAnalysisVersion`, `reviewSessionId` y `reviewedAt`. Cada canal contiene `analysisSource: "human-reviewed"`; no se distribuye identidad del reviewer.
 
-El `reviewed/vN/drums.json` conserva `detectedType`, `detectedConfidence`, `reviewedType`, `effectiveType` y `originalDetection`. Su campo final `type` usa la decisión humana y cae en la predicción solo para hits pendientes. El Teleo Experience es deliberadamente compacto: distribuye `timeMs`, `durationMs`, `type` e `intensity`, sin `ReviewAction` ni datos internos del clasificador.
+El `reviewed/vN/drums.json` conserva `automaticType`, `automatic`, `reviewedType`, `effectiveType` y `originalAutomatic`. Su campo final `type` usa la decisión humana y cae en la propuesta solo para hits pendientes. El Teleo Experience es deliberadamente compacto: distribuye `timeMs`, `durationMs`, `type` e `intensity`, sin MIDI, `ReviewAction` ni datos internos del backend.
 
 ## Semántica destinada a Teleo
 
@@ -105,4 +107,4 @@ Esto documenta el contrato; Resonance no implementa todavía el renderer ni la h
 
 Cuando exista `teleo_experience.reviewed.json`, Teleo debe preferirlo sobre la experiencia automática. Los niveles previstos son `AUTOMATIC`, `HUMAN_REVIEWED` y `TELEO_MASTER`. Ningún flujo actual asigna `TELEO_MASTER`; queda reservado para una futura revisión integral musical, lingüística, visual, háptica y de accesibilidad.
 
-`ReviewDatasetExporter` exporta pares IA/humano para `ASSIGN_DRUM_PIECE`, `ADD`, `DELETE` y el `RELABEL` legado: detected kick → human snare, detected kick → DELETE o detected none → ADD kick. No entrena ni modifica modelos.
+`ReviewDatasetExporter` v2 etiqueta `TRUE_POSITIVE`, `MISCLASSIFICATION`, `FALSE_POSITIVE`, `FALSE_NEGATIVE` y `MANUAL_ADD`. Distingue una ausencia de ADTOF recuperada por `kinetra-onset` de un evento agregado enteramente a mano. No entrena ni modifica modelos.

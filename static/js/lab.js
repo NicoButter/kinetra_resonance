@@ -36,7 +36,9 @@
   let selectedChannel = channelSelect?.value || 'drums';
   let mergePartnerId = null;
   let reviewVersion = config.review?.version || 0;
-  let zoomMs = Number(document.querySelector('#timeline-zoom')?.value || 15) * 1000;
+  const timelineZoomInput = document.querySelector('#timeline-zoom');
+  const timelineZoomValue = document.querySelector('#timeline-zoom-value');
+  let zoomMs = Number(timelineZoomInput?.value || 15) * 1000;
   let renderWindow = {startMs: 0, endMs: 15000, plotLeft: 118, plotWidth: 900};
   let pointerState = null;
   let marquee = null;
@@ -45,9 +47,19 @@
 
   const collectionFor = payload => payload?.events || payload?.notes || payload?.frames || [];
   const eventTime = item => item.timeMs ?? item.startMs ?? 0;
-  const aiConfidence = item => item.detectedConfidence ?? item.confidence ?? item.pitchConfidence ?? 1;
-  const drumLane = item => item.reviewedType || 'unassigned';
-  const effectiveDrumType = item => item.reviewedType || item.effectiveType || item.detectedType || item.type || 'unknown';
+  const automaticDrumType = item => item.automaticType || item.automatic?.type || item.detectedType || (item.source === 'human' ? null : item.type) || 'unassigned';
+  const aiConfidence = item => item.automatic?.confidence ?? item.detectedConfidence ?? item.confidence ?? item.pitchConfidence ?? null;
+  const effectiveDrumType = item => item.reviewedType || item.effectiveType || automaticDrumType(item) || 'unknown';
+  const drumLane = item => effectiveDrumType(item);
+  const drumReviewState = (item, deleted = false) => {
+    if (deleted || item.deleted) return 'DELETED';
+    if (item.reviewStatus) return item.reviewStatus;
+    if (item.source === 'human') return 'MANUAL';
+    if (item.reviewMetadata?.confirmedAutomaticByHuman) return 'CONFIRMED';
+    if (item.reviewedType) return item.reviewedType === automaticDrumType(item) ? 'CONFIRMED' : 'OVERRIDDEN';
+    return 'UNREVIEWED';
+  };
+  const escapeHtml = value => String(value).replace(/[&<>'"]/g, character => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'}[character]));
   const lowerBound = (array, value) => { let low = 0; let high = array.length; while (low < high) { const mid = (low + high) >> 1; if (eventTime(array[mid]) < value) low = mid + 1; else high = mid; } return low; };
   const csrfToken = () => document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
   const formatTime = seconds => { const value = Math.max(0, Number(seconds) || 0); const minutes = Math.floor(value / 60); const rest = value - minutes * 60; return `${String(minutes).padStart(2, '0')}:${rest.toFixed(3).padStart(6, '0')}`; };
@@ -111,7 +123,14 @@
   }
 
   document.querySelector('#playback-speed')?.addEventListener('change', event => { audio.playbackRate = Number(event.target.value); });
-  document.querySelector('#timeline-zoom')?.addEventListener('change', event => { zoomMs = Number(event.target.value) * 1000; });
+  function setTimelineZoom(seconds) {
+    const value = Math.max(0.25, Math.min(30, Number(seconds) || 15));
+    zoomMs = value * 1000;
+    if (timelineZoomInput) timelineZoomInput.value = String(value);
+    if (timelineZoomValue) timelineZoomValue.textContent = `${value.toFixed(2)} s`;
+  }
+  setTimelineZoom(zoomMs / 1000);
+  timelineZoomInput?.addEventListener('input', event => setTimelineZoom(event.target.value));
   channelSelect?.addEventListener('change', event => { selectedChannel = event.target.value; clearSelection(); updateEditorMode(); renderInspector(); });
   document.querySelectorAll('input[name="artifact-stage"]').forEach(input => input.addEventListener('change', event => { stage = event.target.value; clearSelection(); updatePanels(); renderInspector(); }));
   confidenceInput?.addEventListener('input', () => { minimumConfidence = Number(confidenceInput.value); confidenceValue.value = minimumConfidence.toFixed(2); });
@@ -142,7 +161,7 @@
     const active = indices.reviewed.drums || [];
     const countsByPiece = Object.fromEntries(drumPieces.map(piece => [piece, 0]));
     active.forEach(item => { countsByPiece[drumLane(item)] += 1; });
-    const assigned = active.filter(item => item.reviewedType).length;
+    const assigned = active.filter(item => drumReviewState(item) !== 'UNREVIEWED').length;
     const reviewed = assigned + deletedDrums.length;
     const reviewable = active.length + deletedDrums.length;
     return {
@@ -164,7 +183,9 @@
     if (drumStatsPanel) {
       const summary = calculateDrumStats();
       const pieceRows = drumPieces.filter(piece => piece !== 'unassigned').map(piece => `<span><strong>${drumLabels[piece]}</strong> ${summary.counts[piece]}</span>`).join('');
-      drumStatsPanel.innerHTML = `<div class="drum-progress"><strong>Drums review progress: ${(summary.progress * 100).toFixed(1)}%</strong><div class="progress"><i style="width:${summary.progress * 100}%"></i></div>${summary.unassigned ? `<p class="review-warning">${summary.unassigned} drum events remain unassigned.</p>` : ''}</div><div class="drum-counter-grid"><span>Detected hits: <strong>${summary.totalDetected}</strong></span><span>Reviewed: <strong>${summary.reviewed}</strong></span><span>Unassigned: <strong>${summary.unassigned}</strong></span><span>Deleted: <strong>${summary.deleted}</strong></span><span>Manual added: <strong>${summary.manualAdded}</strong></span>${pieceRows}</div>`;
+      const transcription = data.processed.drums?.transcription || data.raw.drums?.transcription;
+      const automaticSummary = transcription ? `<div class="transcription-summary"><strong>Automatic Drum Transcription</strong><span>Backend: ${escapeHtml(String(transcription.backend || 'none').toUpperCase())}</span><span>Device: ${escapeHtml(String(transcription.device || '—').toUpperCase())}</span><span>Duration: ${Number(transcription.processingTime || 0).toFixed(2)} s</span><span>Events: ${Number(transcription.automaticEventCount ?? transcription.eventCount ?? 0)}</span><span>Fallback: ${transcription.fallbackUsed ? 'yes' : 'no'}</span>${Object.entries(transcription.classCounts || {}).map(([piece, count]) => `<span>${escapeHtml(drumLabels[piece] || piece)}: ${Number(count)}</span>`).join('')}${(transcription.warnings || []).map(warning => `<small class="review-warning">${escapeHtml(warning)}</small>`).join('')}</div>` : '';
+      drumStatsPanel.innerHTML = `${automaticSummary}<div class="drum-progress"><strong>Drums review progress: ${(summary.progress * 100).toFixed(1)}%</strong><div class="progress"><i style="width:${summary.progress * 100}%"></i></div>${summary.unassigned ? `<p class="review-warning">${summary.unassigned} drum events remain unassigned.</p>` : ''}</div><div class="drum-counter-grid"><span>Detected hits: <strong>${summary.totalDetected}</strong></span><span>Reviewed: <strong>${summary.reviewed}</strong></span><span>Unassigned: <strong>${summary.unassigned}</strong></span><span>Deleted: <strong>${summary.deleted}</strong></span><span>Manual added: <strong>${summary.manualAdded}</strong></span>${pieceRows}</div>`;
     }
     const selectionCount = document.querySelector('#selection-count');
     if (selectionCount) selectionCount.textContent = `${selectedIds.size} selected`;
@@ -216,6 +237,7 @@
 
   function confidenceVisible(item) {
     const value = aiConfidence(item);
+    if (value == null) return !lowOnlyInput?.checked;
     return lowOnlyInput?.checked ? value < minimumConfidence : value >= minimumConfidence;
   }
 
@@ -233,8 +255,8 @@
     const active = visibleItems('drums', startMs, endMs).filter(item => {
       if (!document.querySelector(`[data-drum-lane="${drumLane(item)}"]`)?.checked) return false;
       if (!checked('#show-manual') && item.source === 'human') return false;
-      if (checked('#reviewed-only') && !item.reviewedType) return false;
-      if (checked('#unreviewed-only') && item.reviewedType) return false;
+      if (checked('#reviewed-only') && drumReviewState(item) === 'UNREVIEWED') return false;
+      if (checked('#unreviewed-only') && drumReviewState(item) !== 'UNREVIEWED') return false;
       return true;
     }).map(item => ({item, deleted: false}));
     if (!checked('#show-deleted') || stage !== 'reviewed') return active;
@@ -302,9 +324,15 @@
       const x = xFor(item.timeMs);
       const y = 9 + row * laneHeight + laneHeight / 2;
       const radius = drawDrumShape(item, piece, x, y, deleted);
-      if (checked('#show-ai-suggestions') && item.detectedType && (selectedIds.has(item.id) || showSuggestionText)) {
-        context.fillStyle = '#99a3b5'; context.font = '10px system-ui'; context.fillText(`AI: ${item.detectedType} ${Math.round((item.detectedConfidence || 0) * 100)}%`, x + radius + 3, y - 5); context.font = '12px system-ui';
+      const proposedType = automaticDrumType(item);
+      const confidence = aiConfidence(item);
+      if (checked('#show-ai-suggestions') && proposedType !== 'unassigned' && (selectedIds.has(item.id) || showSuggestionText)) {
+        const confidenceText = confidence == null ? '' : ` ${Math.round(confidence * 100)}%`;
+        context.fillStyle = '#99a3b5'; context.font = '10px system-ui'; context.fillText(`AI · ${proposedType}${confidenceText}`, x + radius + 3, y - 5); context.font = '12px system-ui';
       }
+      const status = drumReviewState(item, deleted);
+      const badge = status === 'UNREVIEWED' && proposedType !== 'unassigned' ? 'AI · UNREVIEWED' : ({CONFIRMED: '✓ CONFIRMED', OVERRIDDEN: 'H OVERRIDE', MANUAL: 'M MANUAL', DELETED: 'DELETED'}[status] || status);
+      if (selectedIds.has(item.id) || showSuggestionText) { context.fillStyle = '#eff2f8'; context.font = '9px system-ui'; context.fillText(badge, x + radius + 3, y + 8); context.font = '12px system-ui'; }
       drawCache.push({item, channel: 'drums', row, lane: piece, deleted, x0: x - radius - 4, x1: x + radius + 4, y0: y - radius - 5, y1: y + radius + 5, x, y});
       if (selectedIds.has(item.id)) { context.strokeStyle = '#fff'; context.lineWidth = 2; context.strokeRect(x - radius - 5, y - radius - 5, radius * 2 + 10, radius * 2 + 10); context.lineWidth = 1; }
     });
@@ -369,12 +397,13 @@
     if (!inspector) return;
     const item = selectedEvent(); inspector.replaceChildren();
     if (!item) { inspector.textContent = editor ? 'Select an event or double-click a track to add one.' : 'Click an event to inspect it.'; return; }
-    const view = selectedChannel === 'drums' ? {channel: 'drums', source: stage, state: item.deleted ? 'DELETED' : item.source === 'human' ? 'MANUALLY_ADDED' : item.reviewedType ? 'HUMAN_ASSIGNED' : 'AUTO_UNREVIEWED', lane: drumLane(item), effectiveType: effectiveDrumType(item), ...item} : {channel: selectedChannel, source: stage, quality: data.processed[selectedChannel]?.quality || null, ...item};
+    const view = selectedChannel === 'drums' ? {channel: 'drums', artifactStage: stage, reviewState: drumReviewState(item), lane: drumLane(item), effectiveType: effectiveDrumType(item), ...item} : {channel: selectedChannel, source: stage, quality: data.processed[selectedChannel]?.quality || null, ...item};
     const pre = document.createElement('pre'); pre.textContent = JSON.stringify(view, null, 2); inspector.append(pre);
     if (!editor || stage !== 'reviewed' || item.deleted) return;
     const actions = document.createElement('div'); actions.className = 'inspector-actions';
     if (selectedChannel === 'drums') {
       actions.append(button('▶ Audition Hit', auditionSelected));
+      if (automaticDrumType(item) !== 'unassigned' && item.source !== 'human') actions.append(button('Confirm AI suggestion', confirmAutomaticSelected));
       const select = document.createElement('select'); drumPieces.forEach(type => select.add(new Option(drumLabels[type], type))); select.value = drumLane(item); select.addEventListener('change', () => assignSelected(select.value)); actions.append(select);
       actions.append(button('Delete selected', deleteSelected));
       [-50, -10, 10, 50].forEach(delta => actions.append(button(`${delta > 0 ? '+' : ''}${delta} ms`, () => saveAction('MOVE', {eventId: item.id, toMs: Math.round(item.timeMs + delta)}, 'drums'))));
@@ -403,7 +432,18 @@
     const index = events.findIndex(item => item.id === action.eventId);
     if (action.actionType === 'ADD') events.push(action.payload.event);
     else if (action.actionType === 'DELETE' && index >= 0) { const [removed] = events.splice(index, 1); deletedDrums.push({...removed, deleted: true, deletedByActionId: action.id}); deletedDrums.sort((a, b) => eventTime(a) - eventTime(b)); }
-    else if ((action.actionType === 'ASSIGN_DRUM_PIECE' || action.actionType === 'RELABEL') && index >= 0) { events[index].reviewedType = action.payload.to === 'unassigned' ? null : action.payload.to; events[index].effectiveType = events[index].reviewedType || events[index].detectedType || 'unknown'; }
+    else if ((action.actionType === 'ASSIGN_DRUM_PIECE' || action.actionType === 'RELABEL' || action.actionType === 'CONFIRM_DRUM_PIECE') && index >= 0) {
+      events[index].reviewedType = action.payload.to === 'unassigned' ? null : action.payload.to;
+      events[index].effectiveType = events[index].reviewedType || automaticDrumType(events[index]) || 'unknown';
+      if (action.actionType === 'CONFIRM_DRUM_PIECE') {
+        events[index].reviewMetadata = {...events[index].reviewMetadata, confirmedAutomaticByHuman: true};
+        events[index].reviewStatus = 'CONFIRMED';
+      } else if (events[index].reviewedType) {
+        events[index].reviewStatus = events[index].reviewedType === automaticDrumType(events[index]) ? 'CONFIRMED' : 'OVERRIDDEN';
+      } else {
+        events[index].reviewStatus = 'UNREVIEWED';
+      }
+    }
     else if (action.actionType === 'MOVE' && index >= 0) events[index].timeMs = action.payload.toMs;
     else if (action.actionType === 'CHANGE_INTENSITY' && index >= 0) events[index].intensity = action.payload.to;
     else if (action.actionType === 'CONFIRM' && index >= 0) events[index].reviewMetadata = {...events[index].reviewMetadata, confirmedByHuman: true};
@@ -416,7 +456,7 @@
     try {
       const response = await jsonPost(config.review.actionsUrl, {jobId: config.jobId, version: reviewVersion, channel, actionType, payload});
       reviewVersion = response.sessionVersion;
-      if (channel === 'drums' && ['ADD', 'DELETE', 'ASSIGN_DRUM_PIECE', 'RELABEL', 'MOVE', 'CHANGE_INTENSITY', 'CONFIRM'].includes(actionType)) {
+      if (channel === 'drums' && ['ADD', 'DELETE', 'ASSIGN_DRUM_PIECE', 'CONFIRM_DRUM_PIECE', 'RELABEL', 'MOVE', 'CHANGE_INTENSITY', 'CONFIRM'].includes(actionType)) {
         applyDrumAction(response.action); rebuildIndices('reviewed'); updatePanels(); renderInspector();
         if (actionType === 'ADD') { selectedIds = new Set([response.action.eventId]); selectedId = response.action.eventId; }
         if (actionType === 'DELETE') { selectedIds.delete(response.action.eventId); selectedId = selectedIds.values().next().value || null; }
@@ -454,7 +494,20 @@
     const lastTime = Math.max(...ids.map(id => (indices.reviewed.drums || []).find(item => item.id === id)?.timeMs || 0));
     const actions = ids.map(id => ({channel: 'drums', actionType: 'ASSIGN_DRUM_PIECE', payload: {eventId: id, to: piece}}));
     const saved = actions.length === 1 ? await saveAction('ASSIGN_DRUM_PIECE', actions[0].payload, 'drums') : await saveBatch(actions);
-    if (saved && checked('#rapid-drum-review')) navigateUnassigned(1, lastTime, true);
+    if (saved && checked('#rapid-drum-review')) navigateUnreviewed(1, lastTime, true);
+    return saved;
+  }
+
+  async function confirmAutomaticSelected() {
+    const ids = activeSelectedDrumIds().filter(id => {
+      const item = (indices.reviewed.drums || []).find(event => event.id === id);
+      return item && item.source !== 'human' && automaticDrumType(item) !== 'unassigned';
+    });
+    if (!ids.length || stage !== 'reviewed') return false;
+    const lastTime = Math.max(...ids.map(id => (indices.reviewed.drums || []).find(item => item.id === id)?.timeMs || 0));
+    const actions = ids.map(id => ({channel: 'drums', actionType: 'CONFIRM_DRUM_PIECE', payload: {eventId: id}}));
+    const saved = actions.length === 1 ? await saveAction('CONFIRM_DRUM_PIECE', actions[0].payload, 'drums') : await saveBatch(actions);
+    if (saved && checked('#rapid-drum-review')) navigateUnreviewed(1, lastTime, true);
     return saved;
   }
 
@@ -464,7 +517,7 @@
     if (ids.length > 50 && !window.confirm(`Delete ${ids.length} selected drum events from REVIEWED?`)) return;
     const actions = ids.map(id => ({channel: 'drums', actionType: 'DELETE', payload: {eventId: id}}));
     const saved = actions.length === 1 ? await saveAction('DELETE', actions[0].payload, 'drums') : await saveBatch(actions);
-    if (saved) { clearSelection(); if (checked('#rapid-drum-review')) navigateUnassigned(1, audio.currentTime * 1000, true); }
+    if (saved) { clearSelection(); if (checked('#rapid-drum-review')) navigateUnreviewed(1, audio.currentTime * 1000, true); }
   }
 
   function addDrum(piece, timeMs = Math.round(audio.currentTime * 1000)) {
@@ -517,8 +570,8 @@
     if (checked('#auto-audition')) auditionSelected();
   }
 
-  function navigateUnassigned(direction, fromMs = audio.currentTime * 1000, audition = false) {
-    const items = (indices.reviewed.drums || []).filter(item => !item.reviewedType);
+  function navigateUnreviewed(direction, fromMs = audio.currentTime * 1000, audition = false) {
+    const items = (indices.reviewed.drums || []).filter(item => drumReviewState(item) === 'UNREVIEWED');
     if (!items.length) return;
     let target;
     if (direction > 0) target = items.find(item => item.timeMs > fromMs + 1) || items[0];
@@ -611,13 +664,14 @@
 
   document.querySelectorAll('[data-assign-drum]').forEach(element => element.addEventListener('click', () => assignSelected(element.dataset.assignDrum)));
   document.querySelector('#delete-selected')?.addEventListener('click', deleteSelected);
+  document.querySelector('#confirm-ai-suggestion')?.addEventListener('click', confirmAutomaticSelected);
   document.querySelector('#audition-hit')?.addEventListener('click', auditionSelected);
   document.querySelector('#add-drum-event')?.addEventListener('click', () => addDrum(document.querySelector('#add-drum-type').value));
   document.querySelector('#review-undo')?.addEventListener('click', () => cursor('undo'));
   document.querySelector('#review-redo')?.addEventListener('click', () => cursor('redo'));
-  document.querySelector('#previous-unassigned')?.addEventListener('click', () => navigateUnassigned(-1));
-  document.querySelector('#next-unassigned')?.addEventListener('click', () => navigateUnassigned(1));
-  document.querySelector('#rapid-drum-review')?.addEventListener('change', event => { if (event.target.checked) navigateUnassigned(1, audio.currentTime * 1000 - 2, true); });
+  document.querySelector('#previous-unreviewed')?.addEventListener('click', () => navigateUnreviewed(-1));
+  document.querySelector('#next-unreviewed')?.addEventListener('click', () => navigateUnreviewed(1));
+  document.querySelector('#rapid-drum-review')?.addEventListener('change', event => { if (event.target.checked) navigateUnreviewed(1, audio.currentTime * 1000 - 2, true); });
 
   function navigate(direction) {
     const items = indices[stage][selectedChannel] || []; const now = audio.currentTime * 1000; const index = lowerBound(items, now);
@@ -658,11 +712,12 @@
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); cursor('undo'); return; }
     if ((event.ctrlKey || event.metaKey) && (event.key.toLowerCase() === 'y' || (event.shiftKey && event.key.toLowerCase() === 'z'))) { event.preventDefault(); cursor('redo'); return; }
     if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); const delta = (event.shiftKey ? 1 : 0.1) * (event.key === 'ArrowLeft' ? -1 : 1); audio.currentTime = Math.max(0, Math.min(audio.duration || Infinity, audio.currentTime + delta)); return; }
-    if (event.key === '[') { event.preventDefault(); navigateUnassigned(-1); return; }
-    if (event.key === ']') { event.preventDefault(); navigateUnassigned(1); return; }
+    if (event.key === '[') { event.preventDefault(); navigateUnreviewed(-1); return; }
+    if (event.key === ']') { event.preventDefault(); navigateUnreviewed(1); return; }
     if (event.key.toLowerCase() === 'a' && selectedIds.size) { event.preventDefault(); auditionSelected(); return; }
     if (event.key === 'Delete' && selectedIds.size) { event.preventDefault(); deleteSelected(); return; }
     if (!selectedIds.size || selectedChannel !== 'drums') return;
+    if (event.key === 'Enter') { event.preventDefault(); confirmAutomaticSelected(); return; }
     const assignments = {k: 'kick', s: 'snare', h: 'hi_hat', t: 'tom', c: 'crash', p: 'splash', r: 'ride', y: 'cymbal', u: 'unassigned', n: 'unknown'};
     const piece = assignments[event.key.toLowerCase()];
     if (piece) { event.preventDefault(); assignSelected(piece); }

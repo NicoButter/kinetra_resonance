@@ -46,8 +46,8 @@ class PostProcessorUnitTests(TestCase):
             {'timeMs': 170, 'type': 'unknown', 'confidence': .1, 'intensity': .2},
         ]}
         events = DrumsPostProcessor(refractory_windows={'kick': 90}).process(raw)['events']
-        self.assertEqual([event['timeMs'] for event in events if event['type'] == 'kick'], [150])
-        self.assertEqual(len([event for event in events if event['type'] == 'unknown']), 2)
+        self.assertEqual([event['timeMs'] for event in events if event['automaticType'] == 'kick'], [150])
+        self.assertEqual(len([event for event in events if event['automaticType'] == 'unknown']), 2)
         self.assertEqual([event['timeMs'] for event in events], sorted(event['timeMs'] for event in events))
 
     def test_pathological_piano_is_unreliable(self):
@@ -61,7 +61,14 @@ class PostProcessorUnitTests(TestCase):
 @override_settings(MEDIA_ROOT=TEST_MEDIA)
 class PostProcessingPipelineTests(TestCase):
     RAW_PAYLOADS = {
-        'DRUMS': {'events': [{'timeMs': 100, 'type': 'unknown', 'confidence': .2, 'intensity': .4}]},
+        # Equivalent to the normalized output of a mocked ADTOF backend.
+        'DRUMS': {'events': [
+            {'timeMs': 1000, 'durationMs': 80, 'automaticType': 'kick', 'automatic': {'backend': 'adtof', 'type': 'kick', 'confidence': None}, 'intensity': .4},
+            {'timeMs': 1500, 'durationMs': 80, 'automaticType': 'snare', 'automatic': {'backend': 'adtof', 'type': 'snare', 'confidence': None}, 'intensity': .4},
+            {'timeMs': 1750, 'durationMs': 80, 'automaticType': 'hi_hat', 'automatic': {'backend': 'adtof', 'type': 'hi_hat', 'confidence': None}, 'intensity': .4},
+            {'timeMs': 2000, 'durationMs': 80, 'automaticType': 'tom', 'automatic': {'backend': 'adtof', 'type': 'tom', 'confidence': None}, 'intensity': .4},
+            {'timeMs': 2500, 'durationMs': 80, 'automaticType': 'cymbal', 'automatic': {'backend': 'adtof', 'type': 'cymbal', 'confidence': None}, 'intensity': .4},
+        ]},
         'BASS': {'notes': [{'startMs': 100, 'endMs': 200, 'pitchHz': 82.4, 'midi': 40, 'note': 'E2', 'confidence': .8, 'intensity': .7}]},
         'GUITAR': {'notes': [{'startMs': 200, 'endMs': 300, 'pitchHz': None, 'confidence': .2, 'intensity': .6, 'attack': .8}]},
         'PIANO': {'notes': [{'startMs': 300, 'endMs': 400, 'pitchHz': 261.6, 'midi': 60, 'note': 'C4', 'confidence': .8, 'intensity': .6}]},
@@ -80,11 +87,21 @@ class PostProcessingPipelineTests(TestCase):
         raw_before = {artifact.type: artifact.json_file.open('r').read() for artifact in self.job.analysis_artifacts.filter(stage='RAW')}
         MusicalPostProcessor().process(self.job)
         self.assertEqual(self.job.analysis_artifacts.filter(stage='PROCESSED').count(), 6)
-        drums = json.load(self.job.analysis_artifacts.get(stage='PROCESSED', type='DRUMS').json_file.open())
-        self.assertEqual(drums['events'][0]['detectedType'], 'unknown')
-        self.assertIn('detectedConfidence', drums['events'][0])
+        drums_artifact = self.job.analysis_artifacts.get(stage='PROCESSED', type='DRUMS')
+        drums = json.load(drums_artifact.json_file.open())
+        self.assertEqual(drums['events'][0]['automaticType'], 'kick')
+        self.assertEqual(drums['events'][0]['automatic'], {'backend': 'adtof', 'type': 'kick', 'confidence': None})
         self.assertIsNone(drums['events'][0]['reviewedType'])
+        self.assertEqual(drums['events'][0]['reviewStatus'], 'UNREVIEWED')
         self.assertNotIn('type', drums['events'][0])
+        self.assertNotIn('detectedType', drums['events'][0])
+        pieces_directory = Path(drums_artifact.json_file.path).parent / 'drums'
+        for piece, time_ms in {'kick': 1000, 'snare': 1500, 'hi_hat': 1750, 'tom': 2000, 'cymbal': 2500}.items():
+            piece_payload = json.loads((pieces_directory / f'{piece}.json').read_text())
+            self.assertEqual(piece_payload['reviewStatus'], 'automatic')
+            self.assertEqual([event['timeMs'] for event in piece_payload['events']], [time_ms])
+            self.assertEqual(piece_payload['events'][0]['reviewStatus'], 'UNREVIEWED')
+        self.assertEqual(json.loads((pieces_directory / 'unassigned.json').read_text())['events'], [])
         raw_after = {artifact.type: artifact.json_file.open('r').read() for artifact in self.job.analysis_artifacts.filter(stage='RAW')}
         self.assertEqual(raw_before, raw_after)
 

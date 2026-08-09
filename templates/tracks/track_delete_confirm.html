@@ -1,0 +1,24 @@
+{% extends 'base.html' %}
+{% block title %}Delete {{ track.title }} · Kinetra Resonance{% endblock %}
+{% block content %}
+<section class="panel">
+  <p class="eyebrow">Permanent action</p>
+  <h1>Delete track?</h1>
+  <p><strong>{{ track.title }}</strong>{% if track.artist %} by {{ track.artist }}{% endif %} and all data owned by it will be permanently deleted.</p>
+  <p>This includes:</p>
+  <ul>
+    <li>Source audio</li>
+    <li>Processing jobs and stems</li>
+    <li>Analysis artifacts and generated Teleo Experience files</li>
+    <li>Review sessions and human review actions</li>
+  </ul>
+  <p><strong>This action cannot be undone.</strong></p>
+  <div class="track-actions">
+    <a class="button secondary" href="{% url 'track-detail' track.id %}">Cancel</a>
+    <form action="{% url 'track-delete' track.id %}" method="post">
+      {% csrf_token %}
+      <button class="button danger" type="submit">Delete permanently</button>
+    </form>
+  </div>
+</section>
+{% endblock %}

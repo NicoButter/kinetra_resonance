@@ -2,7 +2,7 @@
 {% block content %}
 <section class="section-title">
   <div><p class="eyebrow">Track</p><h1>{{ track.title }}</h1><p class="muted">{{ track.artist|default:'Unknown artist' }} · {{ track.file_size }} bytes · {{ track.duration_ms|default:'—' }} ms</p></div>
-  <div class="track-actions"><a class="button secondary" href="{{ track.source_file.url }}" download>Original audio</a>{% if can_delete %}<form action="{% url 'track-delete' track.id %}" method="post" onsubmit="return confirm('Delete this processed track and all of its associated files? This cannot be undone.');">{% csrf_token %}<button class="button danger" type="submit">Delete processed track</button></form>{% else %}<small class="muted">Deletion is available when processing finishes.</small>{% endif %}</div>
+  <div class="track-actions"><a class="button secondary" href="{{ track.source_file.url }}" download>Original audio</a>{% if can_delete %}<a class="button danger" href="{% url 'track-delete' track.id %}">Delete processed track</a>{% else %}<small class="muted">Deletion is available when processing finishes.</small>{% endif %}</div>
 </section>
 {% if job %}
 <section class="panel" id="job" data-job="{{ job.id }}">
@@ -13,6 +13,15 @@
   <p id="error" class="error">{{ job.error_message }}</p>
   <a class="button secondary" href="{% url 'job-lab' job.id %}">Open Analysis Lab</a>
   {% if job.status == 'COMPLETED' %}<a class="button" href="{% url 'review-editor' job.id %}">Open Review Editor</a>{% endif %}
+</section>
+{% endif %}
+{% if drum_transcription %}
+<section class="panel">
+  <p class="eyebrow">Automatic Drum Transcription</p>
+  <h2>{{ drum_transcription.backend|upper }} · {{ drum_transcription.device|upper }}</h2>
+  <p>{{ drum_transcription.processingTime|floatformat:2 }} s · {{ drum_transcription.eventCount }} fused events · fallback {{ drum_transcription.fallbackUsed|yesno:'used,not used' }}</p>
+  <div class="cards">{% for piece, count in drum_transcription.classCounts.items %}<div class="card"><strong>{{ piece|upper }}</strong><span>{{ count }}</span></div>{% endfor %}</div>
+  {% for warning in drum_transcription.warnings %}<p class="notice error">{{ warning }}</p>{% endfor %}
 </section>
 {% endif %}
 <section>

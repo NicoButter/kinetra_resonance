@@ -1,11 +1,12 @@
 import json
 import math
-from enum import StrEnum
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
 from django.conf import settings
 
+from analysis.drum_transcription import AutomaticDrumTranscriptionService, DrumEventFusionService
 from analysis.models import AnalysisArtifact
 
 
@@ -14,70 +15,12 @@ ANALYSIS_VERSION = 1
 NOTE_NAMES = ('C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B')
 
 
-class DrumEventType(StrEnum):
-    KICK = 'kick'
-    SNARE = 'snare'
-    HI_HAT = 'hi_hat'
-    CYMBAL = 'cymbal'
-    CRASH = 'crash'
-    UNKNOWN = 'unknown'
-
-
 class AnalysisError(RuntimeError):
     pass
 
 
 class IncompleteExperienceError(AnalysisError):
     pass
-
-
-class DrumClassifier:
-    """Conservative descriptor-based classifier; precision is preferred over recall."""
-    confidence_threshold = 0.72
-
-    @staticmethod
-    def descriptors(segment):
-        if len(segment) < 32:
-            return {}
-        windowed = segment * np.hanning(len(segment))
-        spectrum = np.abs(np.fft.rfft(windowed))
-        power = spectrum ** 2
-        frequencies = np.fft.rfftfreq(len(segment), 1 / SAMPLE_RATE)
-        total = float(power.sum()) or 1.0
-        magnitude_total = float(spectrum.sum()) or 1.0
-        first_half = float(np.mean(np.abs(segment[:len(segment) // 2]))) or 1e-12
-        second_half = float(np.mean(np.abs(segment[len(segment) // 2:])))
-        geometric = float(np.exp(np.mean(np.log(spectrum + 1e-12))))
-        arithmetic = float(np.mean(spectrum)) or 1.0
-        return {
-            'lowBandEnergy': clamp(power[frequencies < 220].sum() / total),
-            'midBandEnergy': clamp(power[(frequencies >= 220) & (frequencies < 4000)].sum() / total),
-            'highBandEnergy': clamp(power[frequencies >= 4000].sum() / total),
-            'spectralCentroid': round(float((frequencies * spectrum).sum() / magnitude_total), 2),
-            'spectralFlatness': clamp(geometric / arithmetic),
-            'zeroCrossingRate': clamp(np.mean(np.abs(np.diff(np.signbit(segment))))),
-            'onsetStrength': clamp(np.max(np.abs(segment)) / (np.sqrt(np.mean(segment * segment)) + 1e-12) / 10),
-            'temporalDecay': clamp(1 - min(1.0, second_half / first_half)),
-        }
-
-    def classify(self, segment):
-        features = self.descriptors(segment)
-        if not features:
-            return DrumEventType.UNKNOWN, 0.0, features
-        low, mid, high = features['lowBandEnergy'], features['midBandEnergy'], features['highBandEnergy']
-        candidates = []
-        if low > 0.68 and features['spectralCentroid'] < 1800:
-            candidates.append((DrumEventType.KICK, low))
-        if mid > 0.72 and features['onsetStrength'] > 0.2:
-            candidates.append((DrumEventType.SNARE, mid))
-        if high > 0.78 and features['spectralCentroid'] > 4000:
-            candidates.append((DrumEventType.HI_HAT, high))
-        if not candidates:
-            return DrumEventType.UNKNOWN, clamp(max(low, mid, high) * 0.75), features
-        event_type, confidence = max(candidates, key=lambda item: item[1])
-        if confidence < self.confidence_threshold:
-            event_type = DrumEventType.UNKNOWN
-        return event_type, clamp(confidence), features
 
 
 def clamp(value):
@@ -118,6 +61,31 @@ def spectral_onsets(signal, frame_size=2048, hop_size=512, minimum_gap_ms=80):
         elif flux[index] > flux[selected[-1]]:
             selected[-1] = index
     return [int(round(index * hop_size / SAMPLE_RATE * 1000)) for index in selected]
+
+
+class DrumOnsetDetector:
+    """Detect possible hits and estimate audio intensity around arbitrary onsets."""
+
+    def __init__(self, minimum_gap_ms=55, intensity_window_ms=80):
+        self.minimum_gap_ms = int(minimum_gap_ms)
+        self.intensity_window_ms = int(intensity_window_ms)
+
+    def detect_times(self, signal):
+        return spectral_onsets(signal, minimum_gap_ms=self.minimum_gap_ms)
+
+    def events_at(self, signal, event_times):
+        window = max(1, int(SAMPLE_RATE * self.intensity_window_ms / 1000))
+        raw_strengths = []
+        durations = []
+        for time_ms in event_times:
+            start = min(len(signal), max(0, int(time_ms / 1000 * SAMPLE_RATE)))
+            segment = signal[start:min(start + window, len(signal))]
+            raw_strengths.append(float(np.sqrt(np.mean(segment * segment))) if len(segment) else 0.0)
+            durations.append(max(1, int(round(len(segment) / SAMPLE_RATE * 1000))) if len(segment) else self.intensity_window_ms)
+        return [
+            {'timeMs': int(time_ms), 'durationMs': duration, 'intensity': clamp(intensity)}
+            for time_ms, duration, intensity in zip(event_times, durations, normalized(raw_strengths))
+        ]
 
 
 def estimate_pitch(signal, minimum_hz, maximum_hz):
@@ -176,24 +144,58 @@ class DrumsAnalyzer(BaseAnalyzer):
     stem_name = 'drums'
     filename = 'drums.json'
 
+    def __init__(self, transcription_service=None, onset_detector=None, fusion_service=None):
+        self.transcription_service = transcription_service or AutomaticDrumTranscriptionService()
+        self.onset_detector = onset_detector or DrumOnsetDetector()
+        self.fusion_service = fusion_service or DrumEventFusionService()
+
     def analyze(self, audio_path):
         import essentia.standard as es
         signal = load_audio(audio_path)
         bpm, beats, rhythm_confidence, _, _ = es.RhythmExtractor2013(method='multifeature')(signal)
-        onsets = spectral_onsets(signal, minimum_gap_ms=55)
-        event_times = onsets or [int(round(float(beat) * 1000)) for beat in beats]
-        window = int(SAMPLE_RATE * 0.08)
-        strengths = []
-        events = []
-        for time_ms in event_times:
-            index = min(len(signal), int(time_ms / 1000 * SAMPLE_RATE))
-            segment = signal[index:min(index + window, len(signal))]
-            strengths.append(float(np.sqrt(np.mean(segment * segment))) if len(segment) else 0.0)
-            event_type, confidence, features = DrumClassifier().classify(segment)
-            events.append({'timeMs': time_ms, 'durationMs': int(round(len(segment) / SAMPLE_RATE * 1000)), 'detectedType': event_type, 'detectedConfidence': confidence, 'reviewedType': None, 'features': features})
-        for event, intensity in zip(events, normalized(strengths)):
-            event['intensity'] = clamp(intensity)
-        return {'format': 'kinetra-resonance', 'version': ANALYSIS_VERSION, 'stem': self.stem_name, 'durationMs': duration_ms(signal), 'bpm': round(float(bpm), 2), 'confidence': round(float(rhythm_confidence), 3), 'events': sorted(events, key=lambda event: event['timeMs'])}
+        detected_onsets = self.onset_detector.detect_times(signal)
+        onset_times = detected_onsets or [int(round(float(beat) * 1000)) for beat in beats]
+        onset_source = 'kinetra-onset' if detected_onsets else 'kinetra-rhythm-fallback'
+        transcription = self.transcription_service.transcribe(audio_path)
+
+        automatic_events = [dict(event) for event in transcription.events]
+        all_times = [event['timeMs'] for event in automatic_events] + onset_times
+        intensity_events = self.onset_detector.events_at(signal, all_times)
+        automatic_intensities = intensity_events[:len(automatic_events)]
+        onset_intensities = intensity_events[len(automatic_events):]
+        for event, measured in zip(automatic_events, automatic_intensities):
+            event['intensity'] = measured['intensity']
+        onset_events = []
+        for event in onset_intensities:
+            event['source'] = onset_source
+            onset_events.append(event)
+
+        events = self.fusion_service.fuse(automatic_events, onset_events)
+        class_counts = Counter(event.get('automaticType', 'unassigned') for event in events)
+        matched_count = sum(event.get('source') == 'adtof+kinetra-onset' for event in events)
+        onset_only_count = sum(str(event.get('source', '')).startswith('kinetra-') for event in events)
+        metadata = transcription.metadata()
+        metadata.update({
+            'eventCount': len(events),
+            'automaticEventCount': len(automatic_events),
+            'onsetCount': len(onset_events),
+            'matchedCount': matched_count,
+            'onsetOnlyCount': onset_only_count,
+            'adtofOnlyCount': sum(event.get('source') == 'adtof' for event in events),
+            'onsetRecoveryUsed': onset_only_count > 0,
+            'matchingToleranceMs': self.fusion_service.matching_tolerance_ms,
+            'classCounts': dict(sorted(class_counts.items())),
+        })
+        return {
+            'format': 'kinetra-resonance',
+            'version': ANALYSIS_VERSION,
+            'stem': self.stem_name,
+            'durationMs': duration_ms(signal),
+            'bpm': round(float(bpm), 2),
+            'confidence': round(float(rhythm_confidence), 3),
+            'transcription': metadata,
+            'events': events,
+        }
 
 
 class PitchedStemAnalyzer(BaseAnalyzer):
@@ -323,7 +325,7 @@ class TeleoExperienceBuilder:
     def build_timeline(loaded):
         timeline = []
         for event in loaded[AnalysisArtifact.Type.DRUMS].get('events', []):
-            event_type = event.get('reviewedType') or event.get('effectiveType') or event.get('detectedType') or event.get('type', 'unknown')
+            event_type = event.get('reviewedType') or event.get('effectiveType') or event.get('automaticType') or event.get('detectedType') or event.get('type', 'unknown')
             timeline.append({'timeMs': int(event['timeMs']), 'channel': 'drums', 'type': event_type, 'intensity': event.get('intensity', 0.0)})
         for artifact_type, channel in ((AnalysisArtifact.Type.BASS, 'bass'), (AnalysisArtifact.Type.GUITAR, 'guitar'), (AnalysisArtifact.Type.PIANO, 'piano')):
             for note in loaded[artifact_type].get('notes', []):
@@ -343,20 +345,33 @@ class TeleoExperienceBuilder:
             safe[artifact_type][collection] = payload.get(collection, []) if channels_quality[artifact_type.lower()]['status'] != 'unreliable' else []
         timeline = self.build_timeline(safe)
         drum_events = []
+        drum_piece_events = {
+            'kick': [], 'snare': [], 'hiHat': [], 'tom': [],
+            'crash': [], 'splash': [], 'ride': [], 'cymbal': [],
+        }
+        drum_piece_keys = {'hi_hat': 'hiHat'}
         for event in safe[AnalysisArtifact.Type.DRUMS].get('events', []):
-            event_type = event.get('reviewedType') or event.get('effectiveType') or event.get('detectedType') or event.get('type', 'unknown')
-            compact_event = {key: event[key] for key in ('timeMs', 'durationMs', 'intensity') if key in event}
+            event_type = event.get('reviewedType') or event.get('effectiveType') or event.get('automaticType') or event.get('detectedType') or event.get('type', 'unknown')
+            compact_event = {key: event[key] for key in ('id', 'timeMs', 'durationMs', 'intensity') if key in event}
             compact_event['type'] = event_type
-            confidence = event.get('detectedConfidence', event.get('confidence'))
+            confidence = event.get('automatic', {}).get('confidence')
+            if confidence is None:
+                confidence = event.get('detectedConfidence', event.get('confidence'))
             if confidence is not None and not review_metadata:
                 compact_event['confidence'] = confidence
             drum_events.append(compact_event)
+            piece_key = drum_piece_keys.get(event_type, event_type)
+            if piece_key in drum_piece_events:
+                drum_piece_events[piece_key].append(dict(compact_event))
         payload = {
             'format': 'teleo-music', 'version': 1,
             'analysis': {'engine': 'kinetra-resonance', 'analysisVersion': ANALYSIS_VERSION},
             'track': {'id': str(track.id), 'title': track.title, 'artist': track.artist, 'durationMs': track.duration_ms or drums.get('durationMs'), 'bpm': drums.get('bpm')},
             'channelsQuality': channels_quality,
-            'drums': {'events': drum_events},
+            'drums': {
+                'events': drum_events,
+                **{piece: {'events': events} for piece, events in drum_piece_events.items()},
+            },
             'bass': {'notes': safe[AnalysisArtifact.Type.BASS].get('notes', [])},
             'guitar': {'notes': safe[AnalysisArtifact.Type.GUITAR].get('notes', [])},
             'piano': {'notes': safe[AnalysisArtifact.Type.PIANO].get('notes', [])},

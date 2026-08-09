@@ -55,8 +55,10 @@ class ReviewEngineTests(TestCase):
     def test_models_and_stable_legacy_event_ids(self):
         data = self.engine.load_processed(self.job)
         self.assertEqual(data['drums']['events'][0]['id'], 'drums-000001')
-        self.assertEqual(data['drums']['events'][0]['detectedType'], 'kick')
+        self.assertEqual(data['drums']['events'][0]['automaticType'], 'kick')
+        self.assertEqual(data['drums']['events'][0]['automatic'], {'backend': 'legacy-heuristic', 'type': 'kick', 'confidence': .8})
         self.assertIsNone(data['drums']['events'][0]['reviewedType'])
+        self.assertEqual((data['drums']['events'][0]['effectiveType'], data['drums']['events'][0]['reviewStatus']), ('kick', 'UNREVIEWED'))
         original = json.load(self.job.analysis_artifacts.get(stage='PROCESSED', type='DRUMS').json_file.open())
         self.assertNotIn('id', original['events'][0])
         self.assertEqual(self.session.status, ReviewSession.Status.PENDING)
@@ -77,13 +79,13 @@ class ReviewEngineTests(TestCase):
 
     def test_drum_assignment_preserves_ai_prediction_and_timestamp(self):
         first = self.act('drums', 'ASSIGN_DRUM_PIECE', {'eventId': 'drums-000001', 'to': 'kick'})
-        self.assertEqual(first.payload['from'], 'unassigned')
-        self.assertEqual(first.payload['detected'], {'type': 'kick', 'confidence': .8})
+        self.assertEqual(first.payload['from'], 'kick')
+        self.assertEqual(first.payload['automatic'], {'backend': 'legacy-heuristic', 'type': 'kick', 'confidence': .8})
         second = self.act('drums', 'ASSIGN_DRUM_PIECE', {'eventId': 'drums-000001', 'to': 'snare'})
         self.assertEqual((second.payload['from'], second.payload['to']), ('kick', 'snare'))
         event = self.engine.reconstruct(self.session)['drums']['events'][0]
         self.assertEqual(event['timeMs'], 100)
-        self.assertEqual(event['detectedType'], 'kick')
+        self.assertEqual(event['automaticType'], 'kick')
         self.assertEqual(event['reviewedType'], 'snare')
         self.assertEqual(event['effectiveType'], 'snare')
 
@@ -95,6 +97,34 @@ class ReviewEngineTests(TestCase):
         event = self.engine.reconstruct(self.session)['drums']['events'][0]
         self.assertIsNone(event['reviewedType'])
         self.assertEqual(event['effectiveType'], 'kick')
+
+    def test_confirm_automatic_drum_piece_records_positive_example(self):
+        action = self.act('drums', 'CONFIRM_DRUM_PIECE', {'eventId': 'drums-000001'})
+        self.assertEqual(action.payload['to'], 'kick')
+        event = self.engine.reconstruct(self.session)['drums']['events'][0]
+        self.assertEqual((event['reviewedType'], event['effectiveType']), ('kick', 'kick'))
+        self.assertTrue(event['reviewMetadata']['confirmedAutomaticByHuman'])
+        example = ReviewDatasetExporter().export(self.session)['examples'][0]
+        self.assertEqual(example['outcome'], 'TRUE_POSITIVE')
+        self.assertEqual(example['automatic']['type'], 'kick')
+        self.assertEqual(example['human']['type'], 'kick')
+
+    def test_onset_only_assignment_exports_false_negative(self):
+        artifact = self.job.analysis_artifacts.get(stage='PROCESSED', type='DRUMS')
+        payload = json.load(artifact.json_file.open())
+        payload['events'] = [{
+            'id': 'drums-000001', 'timeMs': 100, 'durationMs': 80, 'intensity': .7,
+            'automaticType': 'unassigned',
+            'automatic': {'backend': None, 'type': None, 'confidence': None},
+            'reviewedType': None, 'effectiveType': 'unassigned',
+            'source': 'kinetra-onset', 'kinetraOnset': {'timeMs': 100, 'deltaMs': 0},
+        }]
+        Path(artifact.json_file.path).write_text(json.dumps(payload), encoding='utf-8')
+        self.act('drums', 'ASSIGN_DRUM_PIECE', {'eventId': 'drums-000001', 'to': 'kick'})
+        example = ReviewDatasetExporter().export(self.session)['examples'][0]
+        self.assertEqual(example['outcome'], 'FALSE_NEGATIVE')
+        self.assertIsNone(example['automatic']['type'])
+        self.assertTrue(example['kinetraOnset'])
 
     def test_assignment_batch_is_one_undo_and_redo_unit(self):
         specs = [
@@ -113,12 +143,12 @@ class ReviewEngineTests(TestCase):
 
     def test_manual_drum_add_and_review_progress(self):
         initial = self.engine.drum_review_summary(self.session)
-        self.assertEqual((initial['reviewed'], initial['unassigned'], initial['progress']), (0, 2, 0.0))
+        self.assertEqual((initial['reviewed'], initial['unassigned'], initial['progress']), (0, 0, 0.0))
         self.act('drums', 'ASSIGN_DRUM_PIECE', {'eventId': 'drums-000001', 'to': 'kick'})
         self.act('drums', 'DELETE', {'eventId': 'drums-000002'})
         added = self.act('drums', 'ADD', {'event': {'timeMs': 900, 'reviewedType': 'tom', 'durationMs': 80, 'intensity': .5}})
         event = next(event for event in self.engine.reconstruct(self.session)['drums']['events'] if event['id'] == added.event_id)
-        self.assertEqual((event['detectedType'], event['detectedConfidence'], event['reviewedType'], event['source']), (None, None, 'tom', 'human'))
+        self.assertEqual((event['automaticType'], event['automatic'], event['reviewedType'], event['source']), ('unassigned', {'backend': None, 'type': None, 'confidence': None}, 'tom', 'human'))
         summary = self.engine.drum_review_summary(self.session)
         self.assertEqual((summary['totalDetected'], summary['assigned'], summary['deleted'], summary['manualAdded'], summary['unassigned']), (2, 2, 1, 1, 0))
         self.assertEqual(summary['progress'], 1.0)
@@ -200,6 +230,13 @@ class ReviewEngineTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'id="track-scrubber"')
         self.assertContains(response, 'Full track navigation')
+        self.assertContains(response, 'Previous unreviewed')
+        self.assertContains(response, 'data-drum-lane="kick"')
+        self.assertContains(response, 'Confirm AI suggestion')
+        self.assertContains(response, '<dt>Enter</dt>', html=True)
+        editor_script = (Path(__file__).resolve().parents[1] / 'static' / 'js' / 'lab.js').read_text()
+        self.assertIn('const drumLane = item => effectiveDrumType(item);', editor_script)
+        self.assertIn("filter(item => drumReviewState(item) === 'UNREVIEWED')", editor_script)
 
     def test_development_media_supports_audio_byte_ranges(self):
         artifact = self.job.analysis_artifacts.get(stage='PROCESSED', type='DRUMS')
@@ -227,10 +264,15 @@ class ReviewEngineTests(TestCase):
         self.assertNotIn('detectedType', experience['drums']['events'][0])
         reviewed_drums = json.loads(Path(artifacts['DRUMS'].json_file.path).read_text())
         reviewed_event = reviewed_drums['events'][0]
-        self.assertEqual((reviewed_event['type'], reviewed_event['detectedType'], reviewed_event['reviewedType']), ('snare', 'kick', 'snare'))
-        self.assertEqual(reviewed_event['originalDetection'], {'type': 'kick', 'confidence': .8})
-        self.assertEqual(reviewed_drums['review']['unassigned'], 1)
+        self.assertEqual((reviewed_event['type'], reviewed_event['automaticType'], reviewed_event['reviewedType']), ('snare', 'kick', 'snare'))
+        self.assertEqual(reviewed_event['reviewStatus'], 'OVERRIDDEN')
+        self.assertEqual(reviewed_event['originalAutomatic'], {'backend': 'legacy-heuristic', 'type': 'kick', 'confidence': .8})
+        self.assertEqual(reviewed_drums['review']['unassigned'], 0)
         self.assertEqual(reviewed_drums['quality']['status'], 'human-reviewed')
+        reviewed_piece = Path(artifacts['DRUMS'].json_file.path).parent / 'drums' / 'snare.json'
+        piece_payload = json.loads(reviewed_piece.read_text())
+        self.assertEqual(piece_payload['reviewStatus'], 'human-reviewed')
+        self.assertEqual([event['id'] for event in piece_payload['events']], ['drums-000001'])
         self.assertEqual(before, self.hashes())
         self.assertEqual(self.job.analysis_artifacts.filter(stage='REVIEWED').count(), 6)
 
@@ -252,11 +294,14 @@ class ReviewEngineTests(TestCase):
         self.act('drums', 'ADD', {'event': {'timeMs': 900, 'reviewedType': 'kick', 'intensity': .5}})
         exported = ReviewDatasetExporter().export(self.session)
         self.assertEqual(exported['examples'][0]['actionType'], 'ASSIGN_DRUM_PIECE')
-        self.assertEqual(exported['examples'][0]['detected'], {'type': 'kick', 'confidence': .8})
+        self.assertEqual(exported['examples'][0]['automatic'], {'backend': 'legacy-heuristic', 'type': 'kick', 'confidence': .8})
         self.assertEqual(exported['examples'][0]['human'], {'action': 'ASSIGN', 'type': 'snare'})
+        self.assertEqual(exported['examples'][0]['outcome'], 'MISCLASSIFICATION')
         self.assertEqual(exported['examples'][1]['human']['action'], 'DELETE')
-        self.assertEqual(exported['examples'][2]['detected'], {'type': None, 'confidence': None})
+        self.assertEqual(exported['examples'][1]['outcome'], 'FALSE_POSITIVE')
+        self.assertEqual(exported['examples'][2]['automatic'], {'backend': None, 'type': None, 'confidence': None})
         self.assertEqual(exported['examples'][2]['human'], {'action': 'ADD', 'type': 'kick'})
+        self.assertEqual(exported['examples'][2]['outcome'], 'MANUAL_ADD')
         action = self.session.actions.first()
-        self.assertEqual(action.payload['from'], 'unassigned')
+        self.assertEqual(action.payload['from'], 'kick')
         self.assertEqual(action.payload['to'], 'snare')

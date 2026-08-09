@@ -78,11 +78,13 @@ class ReviewAction(models.Model):
     class Channel(models.TextChoices):
         DRUMS = 'drums', 'Drums'; BASS = 'bass', 'Bass'; GUITAR = 'guitar', 'Guitar'; PIANO = 'piano', 'Piano'; VOCALS = 'vocals', 'Vocals'; OTHER = 'other', 'Other'
     class Type(models.TextChoices):
-        DELETE = 'DELETE', 'Delete'; ADD = 'ADD', 'Add'; RELABEL = 'RELABEL', 'Relabel'; ASSIGN_DRUM_PIECE = 'ASSIGN_DRUM_PIECE', 'Assign drum piece'; MOVE = 'MOVE', 'Move'; RESIZE = 'RESIZE', 'Resize'; CHANGE_INTENSITY = 'CHANGE_INTENSITY', 'Change intensity'; CHANGE_PITCH = 'CHANGE_PITCH', 'Change pitch'; MERGE = 'MERGE', 'Merge'; SPLIT = 'SPLIT', 'Split'; CONFIRM = 'CONFIRM', 'Confirm'; MARK_RANGE = 'MARK_RANGE', 'Mark range'
+        DELETE = 'DELETE', 'Delete'; ADD = 'ADD', 'Add'; RELABEL = 'RELABEL', 'Relabel'; ASSIGN_DRUM_PIECE = 'ASSIGN_DRUM_PIECE', 'Assign drum piece'; CONFIRM_DRUM_PIECE = 'CONFIRM_DRUM_PIECE', 'Confirm drum piece'; MOVE = 'MOVE', 'Move'; RESIZE = 'RESIZE', 'Resize'; CHANGE_INTENSITY = 'CHANGE_INTENSITY', 'Change intensity'; CHANGE_PITCH = 'CHANGE_PITCH', 'Change pitch'; MERGE = 'MERGE', 'Merge'; SPLIT = 'SPLIT', 'Split'; CONFIRM = 'CONFIRM', 'Confirm'; MARK_RANGE = 'MARK_RANGE', 'Mark range'
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     review_session = models.ForeignKey(ReviewSession, related_name='actions', on_delete=models.CASCADE)
-    parent = models.ForeignKey('self', related_name='children', null=True, blank=True, on_delete=models.PROTECT)
+    # Review actions are an owned lineage inside one review session. Keeping a
+    # parent action must never prevent deletion of its Track aggregate.
+    parent = models.ForeignKey('self', related_name='children', null=True, blank=True, on_delete=models.CASCADE)
     channel = models.CharField(max_length=12, choices=Channel.choices)
     event_id = models.CharField(max_length=100, blank=True)
     action_type = models.CharField(max_length=24, choices=Type.choices)

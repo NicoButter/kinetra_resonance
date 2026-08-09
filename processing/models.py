@@ -18,6 +18,7 @@ class ProcessingJob(models.Model):
     progress = models.PositiveSmallIntegerField(default=0, validators=[MinValueValidator(0), MaxValueValidator(100)])
     current_stage = models.CharField(max_length=100, default='Waiting to start')
     separator_model = models.CharField(max_length=255, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
     error_message = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     started_at = models.DateTimeField(null=True, blank=True)

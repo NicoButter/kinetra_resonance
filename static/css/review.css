@@ -58,6 +58,21 @@
   border-bottom: 1px solid var(--line);
 }
 
+.transcription-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(125px, 1fr));
+  gap: 5px 12px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.transcription-summary strong,
+.transcription-summary small {
+  grid-column: 1 / -1;
+}
+
 .drum-progress {
   margin-top: 12px;
 }
@@ -86,6 +101,19 @@
 
 .review-main .lab-canvas-wrap canvas.timeline-panning {
   cursor: grabbing;
+}
+
+.timeline-zoom output {
+  float: right;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.timeline-zoom input[type="range"] {
+  width: 100%;
+  padding: 0;
+  cursor: ew-resize;
+  accent-color: var(--accent);
 }
 
 .review-scrubber {

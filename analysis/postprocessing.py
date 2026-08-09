@@ -16,6 +16,17 @@ CHANNEL_TYPES = (
     AnalysisArtifact.Type.VOCALS, AnalysisArtifact.Type.OTHER,
 )
 
+AUTOMATIC_DRUM_PIECES = (
+    DrumPieceType.KICK, DrumPieceType.SNARE, DrumPieceType.HI_HAT,
+    DrumPieceType.TOM, DrumPieceType.CYMBAL, DrumPieceType.UNASSIGNED,
+)
+REVIEWED_DRUM_PIECES = (
+    DrumPieceType.KICK, DrumPieceType.SNARE, DrumPieceType.HI_HAT,
+    DrumPieceType.TOM, DrumPieceType.CRASH, DrumPieceType.SPLASH,
+    DrumPieceType.RIDE, DrumPieceType.CYMBAL, DrumPieceType.UNKNOWN,
+    DrumPieceType.UNASSIGNED,
+)
+
 
 def weighted_median(values, weights):
     if not values:
@@ -40,20 +51,73 @@ def quality_payload(score, warnings=None, metrics=None, forced_status=None):
 
 
 def normalize_drum_event_schema(event):
-    """Adapt legacy drum predictions without ever treating them as human review."""
+    """Adapt legacy predictions without ever treating them as human review."""
     legacy_type = event.pop('type', None)
     legacy_confidence = event.pop('confidence', None)
-    detected_type = event.get('detectedType', legacy_type)
-    if detected_type not in set(DrumPieceType.values) - {DrumPieceType.UNASSIGNED}:
-        detected_type = DrumPieceType.UNKNOWN
+    legacy_detected_type = event.pop('detectedType', None)
+    legacy_detected_confidence = event.pop('detectedConfidence', None)
+    automatic = copy.deepcopy(event.get('automatic')) if isinstance(event.get('automatic'), dict) else {}
+    automatic_type = event.get('automaticType', automatic.get('type', legacy_detected_type or legacy_type))
+    valid_automatic_types = set(DrumPieceType.values) - {DrumPieceType.UNASSIGNED}
+    if automatic_type is None or automatic_type == DrumPieceType.UNASSIGNED:
+        automatic_type = DrumPieceType.UNASSIGNED
+        automatic_value = None
+    elif automatic_type not in valid_automatic_types:
+        automatic_type = DrumPieceType.UNKNOWN
+        automatic_value = DrumPieceType.UNKNOWN
+    else:
+        automatic_value = automatic_type
     reviewed_type = event.get('reviewedType')
-    if reviewed_type not in set(DrumPieceType.values) - {DrumPieceType.UNASSIGNED}:
+    if reviewed_type not in valid_automatic_types:
         reviewed_type = None
-    event['detectedType'] = detected_type
-    event['detectedConfidence'] = event.get('detectedConfidence', legacy_confidence)
+    automatic_confidence = automatic.get('confidence', legacy_detected_confidence)
+    if automatic_confidence is None:
+        automatic_confidence = legacy_confidence
+    automatic.update({
+        'backend': automatic.get('backend') or ('legacy-heuristic' if automatic_value else None),
+        'type': automatic_value,
+        'confidence': automatic_confidence,
+    })
+    event['automatic'] = automatic
+    event['automaticType'] = automatic_type
     event['reviewedType'] = reviewed_type
-    event['effectiveType'] = reviewed_type or detected_type
+    event['effectiveType'] = reviewed_type or automatic_type
+    event['reviewStatus'] = drum_review_status(event)
     return event
+
+
+def drum_review_status(event):
+    """Keep classification and human-review state as separate dimensions."""
+    if event.get('deleted'):
+        return 'DELETED'
+    if event.get('source') == 'human':
+        return 'MANUAL'
+    reviewed_type = event.get('reviewedType')
+    if event.get('reviewMetadata', {}).get('confirmedAutomaticByHuman'):
+        return 'CONFIRMED'
+    if reviewed_type:
+        return 'CONFIRMED' if reviewed_type == event.get('automaticType') else 'OVERRIDDEN'
+    return 'UNREVIEWED'
+
+
+def drum_piece_payload(piece, events, review_status):
+    return {
+        'format': 'kinetra-drum-events',
+        'version': 1,
+        'piece': piece,
+        'reviewStatus': review_status,
+        'events': [copy.deepcopy(event) for event in events if event.get('effectiveType') == piece],
+    }
+
+
+def write_drum_piece_artifacts(processing_job, events, *, folder, review_status, pieces):
+    """Materialize semantic drum metadata without creating audio sub-stems."""
+    paths = {}
+    for piece in pieces:
+        payload = drum_piece_payload(piece, events, review_status)
+        _, path = write_payload(processing_job, f'{piece}.json', payload, folder=folder)
+        paths[piece] = path
+    return paths
 
 
 def assign_stable_event_ids(payload, channel):
@@ -79,20 +143,22 @@ class DrumsPostProcessor(BasePostProcessor):
             'kick': settings.DRUM_REFRACTORY_KICK_MS,
             'snare': settings.DRUM_REFRACTORY_SNARE_MS,
             'hi_hat': settings.DRUM_REFRACTORY_HI_HAT_MS,
+            'tom': settings.DRUM_REFRACTORY_TOM_MS,
             'crash': settings.DRUM_REFRACTORY_CRASH_MS,
             'cymbal': settings.DRUM_REFRACTORY_CYMBAL_MS,
         }
 
     @staticmethod
     def strength(event):
-        return float(event.get('detectedConfidence', event.get('confidence', 0)) or 0) + float(event.get('intensity', 0))
+        return float(event.get('automatic', {}).get('confidence') or 0) + float(event.get('intensity', 0))
 
     def process(self, payload):
         result = copy.deepcopy(payload)
         processed = []
         last_by_type = {}
-        for event in sorted(result.get('events', []), key=lambda item: item['timeMs']):
-            event_type = event.get('detectedType', event.get('type', 'unknown'))
+        for source_event in sorted(result.get('events', []), key=lambda item: item['timeMs']):
+            event = normalize_drum_event_schema(source_event)
+            event_type = event['automaticType']
             window = self.refractory_windows.get(event_type)
             previous_index = last_by_type.get(event_type)
             if window is not None and previous_index is not None and event['timeMs'] - processed[previous_index]['timeMs'] < window:
@@ -272,6 +338,10 @@ class MusicalPostProcessor:
                 raw_payload = json.load(artifact_file)
             processed = processor_class().process(raw_payload)
             assign_stable_event_ids(processed, artifact_type)
+            if artifact_type == AnalysisArtifact.Type.DRUMS:
+                processed['pieceArtifacts'] = {
+                    piece: f'drums/{piece}.json' for piece in AUTOMATIC_DRUM_PIECES
+                }
             filename = f'{artifact_type.lower()}.json'
             _, path = write_payload(processing_job, filename, processed, folder='processed')
             relative = path.relative_to(settings.MEDIA_ROOT).as_posix()
@@ -279,6 +349,11 @@ class MusicalPostProcessor:
                 processing_job=processing_job, type=artifact_type, stage=AnalysisArtifact.Stage.PROCESSED, version=1,
                 defaults={'track': processing_job.track, 'stem': artifact.stem, 'json_file': relative},
             )[0]
+            if artifact_type == AnalysisArtifact.Type.DRUMS:
+                write_drum_piece_artifacts(
+                    processing_job, processed['events'], folder='processed/drums',
+                    review_status='automatic', pieces=AUTOMATIC_DRUM_PIECES,
+                )
         return generated
 
 
@@ -293,11 +368,11 @@ class DrumsQualityValidator(BaseQualityValidator):
     collection = 'events'
     def validate(self, payload):
         events = payload.get('events', [])
-        unknown = sum(event.get('effectiveType', event.get('detectedType', event.get('type'))) == 'unknown' for event in events)
+        unknown = sum(event.get('effectiveType', event.get('automaticType', event.get('detectedType', event.get('type')))) in {'unknown', 'unassigned'} for event in events)
         ratio = unknown / len(events) if events else 1.0
         score = (1 - ratio) * 0.8 + (0.2 if events else 0)
         warnings = ['High proportion of unclassified drum events.'] if ratio > 0.5 else []
-        return quality_payload(score, warnings, {'eventCount': len(events), 'unknownCount': unknown, 'unknownRatio': round(ratio, 4)})
+        return quality_payload(score, warnings, {'eventCount': len(events), 'unclassifiedCount': unknown, 'unclassifiedRatio': round(ratio, 4)})
 
 
 class NotesQualityValidator(BaseQualityValidator):

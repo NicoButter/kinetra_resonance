@@ -9,7 +9,10 @@ from django.db.models import Max
 from django.utils import timezone
 
 from analysis.models import AnalysisArtifact, DrumPieceType, ReviewAction, ReviewSession
-from analysis.postprocessing import CHANNEL_TYPES, QualityValidator, assign_stable_event_ids
+from analysis.postprocessing import (
+    CHANNEL_TYPES, REVIEWED_DRUM_PIECES, QualityValidator, assign_stable_event_ids,
+    drum_review_status, write_drum_piece_artifacts,
+)
 from analysis.services import TeleoExperienceBuilder, write_payload
 
 
@@ -38,12 +41,31 @@ def midi_fields(midi):
 
 
 def drum_lane(event):
-    return event.get('reviewedType') or DrumPieceType.UNASSIGNED
+    return event.get('effectiveType') or automatic_type(event)
+
+
+def automatic_type(event):
+    value = event.get('automaticType')
+    if value is None:
+        value = event.get('automatic', {}).get('type')
+    if value is None:
+        value = event.get('detectedType')
+    return value if value in DRUM_TYPES else DrumPieceType.UNKNOWN
+
+
+def automatic_snapshot(event):
+    automatic = copy.deepcopy(event.get('automatic')) if isinstance(event.get('automatic'), dict) else {}
+    value = automatic_type(event)
+    automatic.setdefault('backend', 'legacy-heuristic' if event.get('detectedType') else None)
+    automatic.setdefault('type', None if value == DrumPieceType.UNASSIGNED else value)
+    automatic.setdefault('confidence', event.get('detectedConfidence'))
+    return automatic
 
 
 def set_drum_piece(event, piece):
     event['reviewedType'] = None if piece == DrumPieceType.UNASSIGNED else piece
-    event['effectiveType'] = event.get('reviewedType') or event.get('detectedType') or DrumPieceType.UNKNOWN
+    event['effectiveType'] = event.get('reviewedType') or automatic_type(event)
+    event['reviewStatus'] = drum_review_status(event)
 
 
 class ReviewEngine:
@@ -106,6 +128,10 @@ class ReviewEngine:
                 set_drum_piece(event, payload['to'])
             else:
                 event['type'] = payload['to']
+        elif action.action_type == ReviewAction.Type.CONFIRM_DRUM_PIECE:
+            set_drum_piece(event, payload['to'])
+            event.setdefault('reviewMetadata', {})['confirmedAutomaticByHuman'] = True
+            event['reviewStatus'] = drum_review_status(event)
         elif action.action_type == ReviewAction.Type.MOVE:
             if channel == 'drums' or channel in {'vocals', 'other'}:
                 event['timeMs'] = payload['toMs']
@@ -188,7 +214,13 @@ class ReviewEngine:
                 if piece not in ASSIGNED_DRUM_TYPES: raise ReviewValidationError('Invalid drum type.')
                 event['durationMs'] = max(1, min(1000, int(event.get('durationMs', 80))))
                 event.pop('type', None)
-                event.update({'detectedType': None, 'detectedConfidence': None, 'reviewedType': piece, 'effectiveType': piece})
+                event.update({
+                    'automaticType': DrumPieceType.UNASSIGNED,
+                    'automatic': {'backend': None, 'type': None, 'confidence': None},
+                    'reviewedType': piece,
+                    'effectiveType': piece,
+                    'reviewStatus': 'MANUAL',
+                })
             elif channel in NOTE_CHANNELS:
                 event['startMs'] = self.validate_time(event.get('startMs'), duration, 'startMs')
                 event['endMs'] = self.validate_time(event.get('endMs'), duration, 'endMs')
@@ -219,7 +251,21 @@ class ReviewEngine:
                 'action': action_type,
                 'from': drum_lane(event),
                 'to': target,
-                'detected': {'type': event.get('detectedType'), 'confidence': event.get('detectedConfidence')},
+                'automatic': automatic_snapshot(event),
+                'kinetraOnset': bool(event.get('kinetraOnset')),
+            }
+        if action_type == ReviewAction.Type.CONFIRM_DRUM_PIECE:
+            if channel != 'drums':
+                raise ReviewValidationError('Only automatic drum suggestions can be confirmed.')
+            target = automatic_type(event)
+            if target not in ASSIGNED_DRUM_TYPES or event.get('source') == 'human':
+                raise ReviewValidationError('This event has no automatic drum suggestion to confirm.')
+            return event_id, {
+                'action': action_type,
+                'from': drum_lane(event),
+                'to': target,
+                'automatic': automatic_snapshot(event),
+                'kinetraOnset': bool(event.get('kinetraOnset')),
             }
         if action_type == ReviewAction.Type.RELABEL:
             if channel != 'drums' or incoming.get('to') not in ASSIGNED_DRUM_TYPES: raise ReviewValidationError('Invalid drum relabel.')
@@ -227,7 +273,8 @@ class ReviewEngine:
                 'action': action_type,
                 'from': drum_lane(event),
                 'to': incoming['to'],
-                'detected': {'type': event.get('detectedType'), 'confidence': event.get('detectedConfidence')},
+                'automatic': automatic_snapshot(event),
+                'kinetraOnset': bool(event.get('kinetraOnset')),
                 'legacyAction': True,
             }
         if action_type == ReviewAction.Type.MOVE:
@@ -381,7 +428,7 @@ class ReviewEngine:
         counts = {piece: 0 for piece in DrumPieceType.values}
         for event in active:
             counts[drum_lane(event)] += 1
-        assigned = sum(1 for event in active if event.get('reviewedType'))
+        assigned = sum(1 for event in active if drum_review_status(event) != 'UNREVIEWED')
         reviewed = assigned + len(deleted)
         reviewable = len(active) + len(deleted)
         return {
@@ -400,10 +447,10 @@ class ReviewEngine:
         result = {key: copy.deepcopy(value) for key, value in payload.items() if key not in {'events', 'quality', 'review', 'reviewMetadata'}}
         events = []
         for source_event in payload.get('events', []):
-            detected_type = source_event.get('detectedType')
-            detected_confidence = source_event.get('detectedConfidence')
+            automatic = automatic_snapshot(source_event)
+            proposed_type = automatic_type(source_event)
             reviewed_type = source_event.get('reviewedType')
-            effective_type = reviewed_type or detected_type or DrumPieceType.UNKNOWN
+            effective_type = reviewed_type or proposed_type
             source = 'human-added' if source_event.get('source') == 'human' else 'human-reviewed' if reviewed_type else 'automatic'
             event = {
                 'id': source_event['id'],
@@ -412,12 +459,15 @@ class ReviewEngine:
                 'type': effective_type,
                 'intensity': source_event.get('intensity', 0.5),
                 'source': source,
-                'detectedType': detected_type,
-                'detectedConfidence': detected_confidence,
+                'automaticType': proposed_type,
+                'automatic': automatic,
                 'reviewedType': reviewed_type,
                 'effectiveType': effective_type,
-                'originalDetection': {'type': detected_type, 'confidence': detected_confidence},
+                'reviewStatus': drum_review_status(source_event),
+                'originalAutomatic': automatic,
             }
+            if source_event.get('kinetraOnset'):
+                event['kinetraOnset'] = copy.deepcopy(source_event['kinetraOnset'])
             if source_event.get('reviewMetadata'):
                 event['reviewMetadata'] = copy.deepcopy(source_event['reviewMetadata'])
             events.append(event)
@@ -463,6 +513,12 @@ class ReviewEngine:
                 payload['quality'] = QualityValidator.VALIDATORS[artifact_type]().validate(payload)
                 payload['reviewMetadata'] = {'status': 'human-reviewed', 'reviewSessionId': str(session.id), 'reviewVersion': session.review_version}
             _, path = write_payload(session.processing_job, f'{channel}.json', payload, folder=f'reviewed/v{session.review_version}')
+            if channel == ReviewAction.Channel.DRUMS:
+                write_drum_piece_artifacts(
+                    session.processing_job, payload['events'],
+                    folder=f'reviewed/v{session.review_version}/drums',
+                    review_status='human-reviewed', pieces=REVIEWED_DRUM_PIECES,
+                )
             artifacts[artifact_type] = AnalysisArtifact.objects.update_or_create(
                 processing_job=session.processing_job, type=artifact_type, stage=AnalysisArtifact.Stage.REVIEWED, version=session.review_version,
                 defaults={'track': session.processing_job.track, 'stem': None, 'json_file': path.relative_to(settings.MEDIA_ROOT).as_posix()},
@@ -486,7 +542,7 @@ class ReviewDatasetExporter:
     def export(self, session):
         examples = []
         for action in ReviewEngine.lineage(session):
-            if action.action_type not in {ReviewAction.Type.DELETE, ReviewAction.Type.RELABEL, ReviewAction.Type.ASSIGN_DRUM_PIECE, ReviewAction.Type.ADD}:
+            if action.action_type not in {ReviewAction.Type.DELETE, ReviewAction.Type.RELABEL, ReviewAction.Type.ASSIGN_DRUM_PIECE, ReviewAction.Type.CONFIRM_DRUM_PIECE, ReviewAction.Type.ADD}:
                 continue
             example = {
                 'channel': action.channel,
@@ -500,15 +556,31 @@ class ReviewDatasetExporter:
             if action.channel == ReviewAction.Channel.DRUMS:
                 if action.action_type == ReviewAction.Type.ADD:
                     event = action.payload['event']
-                    detected = {'type': None, 'confidence': None}
+                    automatic = {'backend': None, 'type': None, 'confidence': None}
                     human = {'action': 'ADD', 'type': event['reviewedType']}
+                    outcome = 'MANUAL_ADD'
+                    kinetra_onset = False
                 elif action.action_type == ReviewAction.Type.DELETE:
                     event = action.payload['original']
-                    detected = {'type': event.get('detectedType'), 'confidence': event.get('detectedConfidence')}
+                    automatic = automatic_snapshot(event)
                     human = {'action': 'DELETE', 'type': None}
+                    outcome = 'FALSE_POSITIVE' if automatic.get('type') else 'ONSET_REJECTED'
+                    kinetra_onset = bool(event.get('kinetraOnset'))
                 else:
-                    detected = action.payload.get('detected', {'type': None, 'confidence': None})
+                    automatic = action.payload.get('automatic') or action.payload.get('detected', {'type': None, 'confidence': None})
                     human = {'action': 'ASSIGN', 'type': None if action.payload['to'] == DrumPieceType.UNASSIGNED else action.payload['to']}
-                example.update({'detected': detected, 'human': human})
+                    kinetra_onset = bool(action.payload.get('kinetraOnset'))
+                    if automatic.get('type') is None and action.payload.get('kinetraOnset'):
+                        outcome = 'FALSE_NEGATIVE'
+                    elif automatic.get('type') == human['type']:
+                        outcome = 'TRUE_POSITIVE'
+                    else:
+                        outcome = 'MISCLASSIFICATION'
+                example.update({
+                    'automatic': automatic,
+                    'kinetraOnset': kinetra_onset,
+                    'human': human,
+                    'outcome': outcome,
+                })
             examples.append(example)
-        return {'format': 'kinetra-review-dataset', 'version': 1, 'examples': examples}
+        return {'format': 'kinetra-review-dataset', 'version': 2, 'examples': examples}

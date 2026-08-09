@@ -61,9 +61,15 @@ Teleo requiere exactamente los tipos vocals, drums, bass, guitar, piano y other.
 
 ## Análisis de batería
 
-`analysis.services.DrumsAnalyzer` carga el audio mono con Essentia. `RhythmExtractor2013(method='multifeature')` devuelve BPM y confianza. Los eventos parten de transientes por flujo espectral. El clasificador automático produce `detectedType` y `detectedConfidence`; nunca produce una revisión humana. `reviewedType` empieza en `null` y se modifica solamente al reconstruir ReviewActions. Artefactos históricos con `type/confidence` se adaptan en memoria y no se reescriben.
+`analysis.services.DrumsAnalyzer` carga el audio mono con Essentia. `RhythmExtractor2013(method='multifeature')` conserva BPM y confianza rítmica. `DrumOnsetDetector` conserva flujo espectral e intensidad RMS; `AutomaticDrumTranscriptionService` obtiene familias desde un backend intercambiable; `DrumEventFusionService` une ambos resultados uno-a-uno. `reviewedType` empieza en `null` y se modifica solamente al reconstruir ReviewActions. Artifacts históricos con `type/confidence` o `detectedType/detectedConfidence` se adaptan en memoria y no se reescriben.
+
+La implementación `ADTOFDrumTranscriptionBackend` y `ADTOFMidiAdapter` importa ADTOF/torch/pretty_midi de manera lazy durante el análisis. Ningún import opcional ocurre al iniciar Django. Consultá [Automatic Drum Transcription](DRUM_TRANSCRIPTION.md) para API verificada, instalación, mapping, fallback y licencia.
 
 `DrumPieceType` define `unassigned`, `kick`, `snare`, `hi_hat`, `tom`, `crash`, `splash`, `ride`, `cymbal` y `unknown`. `ASSIGN_DRUM_PIECE` cambia la lane semántica sin cambiar el timestamp. `MOVE` cambia el timestamp sin cambiar la lane. No existen sub-stems kick/snare/hi-hat: `drums.wav` permanece intacto.
+
+La clasificación y la revisión son dimensiones independientes: `automaticType` es la sugerencia, `reviewedType` es la decisión humana, `effectiveType` resuelve `reviewedType ?? automaticType` y `reviewStatus` es `UNREVIEWED`, `CONFIRMED`, `OVERRIDDEN`, `MANUAL` o `DELETED`. El editor posiciona todos los hits por `effectiveType`; por eso un kick sugerido pero aún no auditado permanece en KICK, no en UNASSIGNED.
+
+`processed/drums.json` continúa como manifest compatible y se materializan `processed/drums/{kick,snare,hi_hat,tom,cymbal,unassigned}.json`. Al finalizar una revisión se conservan los manifests versionados y se agregan `reviewed/vN/drums/` por pieza. Son JSON de metadata con IDs estables, nunca audio separado. Teleo conserva su timeline global y expone grupos de drums por familia para evitar filtrado runtime.
 
 Todos los analizadores cargan a 44.1 kHz de forma explícita. Bajo, guitarra y piano usan onsets por flujo espectral y pitch por autocorrelación con umbral de confianza. Vocals y other generan frames temporales normalizados. Consultar `ANALYSIS_PIPELINE.md` para algoritmos y limitaciones.
 
@@ -80,6 +86,7 @@ Todos los analizadores cargan a 44.1 kHz de forma explícita. Bajo, guitarra y p
 | `/` | GET | Inicio y tracks recientes |
 | `/tracks/new/` | GET, POST | Carga y creación de job |
 | `/tracks/<uuid>/` | GET | Estado, stems y resultado |
+| `/tracks/<uuid>/delete/` | GET, POST | Confirmación y borrado permanente del agregado del track |
 | `/lab/` | GET | Laboratorio de batería |
 | `/lab/jobs/<job_uuid>/` | GET | Laboratorio RAW/PROCESSED sincronizado con audio |
 | `/review/jobs/<job_uuid>/` | GET | Resonance Review Editor |
@@ -94,6 +101,12 @@ Las APIs usan `JsonResponse`; no hay autenticación ni Django REST Framework en 
 Los endpoints de `/api/reviews/` guardan acciones, reconstruyen REVIEWED, mueven el cursor Undo/Redo, resumen y finalizan. Todas las escrituras requieren la versión actual de la sesión; una versión obsoleta responde `409`.
 
 `POST /api/reviews/<session>/actions/batch/` crea acciones individuales con un `batch_id` común y avanza la versión optimista una vez. El endpoint de datos incluye `drumReview` y `deletedDrums` para contadores/auditoría sin incorporar eliminados al artifact materializado.
+
+## Eliminación de tracks
+
+`TrackDeletionService` trata al track como un agregado de propiedad. El grafo de base de datos es: `Track → ProcessingJob` (`processing_jobs`, `CASCADE`), `Track → Stem` (`stems`, `CASCADE`), `Track/ProcessingJob → AnalysisArtifact` (`analysis_artifacts`, `CASCADE`), `ProcessingJob → ReviewSession` (`review_sessions`, `CASCADE`) y `ReviewSession → ReviewAction` (`actions`, `CASCADE`). La cadena `ReviewAction.parent` también usa `CASCADE`: es un historial interno de la misma revisión y no debe bloquear el borrado del track.
+
+El servicio resuelve únicamente `MEDIA_ROOT/tracks/<track_uuid>`, comprueba que permanezca dentro de `MEDIA_ROOT`, elimina las filas dentro de `transaction.atomic()` y programa `shutil.rmtree()` con `transaction.on_commit()`. Si el filesystem falla tras el commit, se registra el error y no se recrean filas de base de datos. No hay signals de borrado ni un segundo mecanismo que elimine esos archivos.
 
 ## Seguridad y límites actuales
 

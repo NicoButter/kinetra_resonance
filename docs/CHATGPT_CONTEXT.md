@@ -94,12 +94,12 @@ El perfil predeterminado es `TELEO_6_STEM`, con `htdemucs_6s.yaml`. `VOCAL_EXTRA
   "bpm": 118.4,
   "confidence": 3.82,
   "events": [
-    {"timeMs": 421, "detectedType": "kick", "detectedConfidence": 0.73, "reviewedType": null, "intensity": 0.91}
+    {"timeMs": 421, "automaticType": "kick", "automatic": {"backend": "adtof", "type": "kick", "confidence": null}, "reviewedType": null, "effectiveType": "kick", "intensity": 0.91}
   ]
 }
 ```
 
-Los timestamps están en milisegundos e `intensity` siempre pertenece a `[0.0, 1.0]`. `detectedType` es una sugerencia automática y nunca se sobrescribe; `reviewedType` contiene exclusivamente la asignación humana. El editor admite kick, snare, hi-hat, tom, crash, splash, ride, cymbal y unknown. Un hit sin revisión permanece visualmente en `UNASSIGNED`.
+Los timestamps están en milisegundos e `intensity` siempre pertenece a `[0.0, 1.0]`. `automaticType` es una sugerencia automática y nunca se sobrescribe; `reviewedType` contiene exclusivamente la asignación humana. ADTOF no aporta confidence por evento. El editor admite kick, snare, hi-hat, tom, crash, splash, ride, cymbal y unknown. Un hit sin revisión permanece visualmente en `UNASSIGNED` en HUMAN REVIEW VIEW.
 
 ## Restricciones para cambios futuros
 
@@ -113,6 +113,6 @@ Los timestamps están en milisegundos e `intensity` siempre pertenece a `[0.0, 1
 
 ## Próximo hito
 
-Usar el dataset AI-vs-human exportable para evaluar y mejorar `DrumClassifier`, sin entrenar automáticamente ni implementar todavía la representación visual/háptica de Teleo.
+Usar el dataset automatic-vs-human exportable para evaluar ADTOF y preparar un futuro backend/modelo propio, sin entrenar automáticamente ni implementar todavía la representación visual/háptica de Teleo.
 
 El destino arquitectónico es: audio original → seis stems → analizadores por stem → JSON estructurados (`metadata`, instrumentos, timeline, visemas, haptics) → paquete de experiencia Teleo. Los WAV son material intermedio, no el producto final principal.

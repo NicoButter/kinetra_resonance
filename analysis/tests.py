@@ -1,12 +1,13 @@
 import json
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import numpy as np
 from django.core.files.base import ContentFile
 from django.test import TestCase, override_settings
 
 from analysis.models import AnalysisArtifact
+from analysis.drum_transcription import DrumTranscriptionResult
 from analysis.services import (
     BassAnalyzer, DrumsAnalyzer, GuitarAnalyzer, IncompleteExperienceError,
     OtherAnalyzer, PianoAnalyzer, TeleoExperienceBuilder, VocalsAnalyzer, clamp,
@@ -25,13 +26,36 @@ class AnalyzerTests(TestCase):
     @patch('essentia.standard.RhythmExtractor2013')
     def test_drums_schema_order_and_normalization(self, rhythm_class, load, onsets):
         rhythm_class.return_value.return_value = (120.0, np.array([.1, .5]), 2.0, None, None)
-        payload = DrumsAnalyzer().analyze('drums.wav')
+        transcription = Mock()
+        transcription.transcribe.return_value = DrumTranscriptionResult(events=[
+            {'timeMs': 100, 'durationMs': 100, 'automaticType': 'kick', 'automatic': {'backend': 'adtof', 'type': 'kick', 'confidence': None}, 'reviewedType': None, 'effectiveType': 'kick', 'source': 'adtof'},
+            {'timeMs': 500, 'durationMs': 100, 'automaticType': 'snare', 'automatic': {'backend': 'adtof', 'type': 'snare', 'confidence': None}, 'reviewedType': None, 'effectiveType': 'snare', 'source': 'adtof'},
+        ], backend='adtof', backend_version='0.1.0', device='cpu')
+        payload = DrumsAnalyzer(transcription_service=transcription).analyze('drums.wav')
         self.assertEqual(payload['stem'], 'drums')
         self.assertEqual([event['timeMs'] for event in payload['events']], [100, 500])
-        self.assertTrue(all({'durationMs', 'detectedType', 'detectedConfidence', 'reviewedType', 'intensity'} <= set(event) for event in payload['events']))
-        self.assertTrue(all(event['detectedType'] in {'kick', 'snare', 'hi_hat', 'cymbal', 'crash', 'unknown'} for event in payload['events']))
+        self.assertTrue(all({'id', 'durationMs', 'automaticType', 'automatic', 'reviewedType', 'effectiveType', 'intensity'} <= set(event) for event in payload['events']))
+        self.assertEqual([event['automaticType'] for event in payload['events']], ['kick', 'snare'])
+        self.assertTrue(all(event['automatic']['confidence'] is None for event in payload['events']))
         self.assertTrue(all(event['reviewedType'] is None for event in payload['events']))
         self.assertTrue(all(0 <= event['intensity'] <= 1 for event in payload['events']))
+        self.assertEqual(payload['transcription']['matchedCount'], 2)
+
+    @patch('analysis.services.spectral_onsets', return_value=[100, 500])
+    @patch('analysis.services.load_audio', return_value=SIGNAL)
+    @patch('essentia.standard.RhythmExtractor2013')
+    def test_drums_falls_back_to_unassigned_onsets(self, rhythm_class, load, onsets):
+        rhythm_class.return_value.return_value = (120.0, np.array([.1, .5]), 2.0, None, None)
+        transcription = Mock()
+        transcription.transcribe.return_value = DrumTranscriptionResult(
+            backend='adtof', device='cpu', available=False, fallback_used=True,
+            warnings=['Automatic drum transcription unavailable. Human classification required.'],
+        )
+        payload = DrumsAnalyzer(transcription_service=transcription).analyze('drums.wav')
+        self.assertEqual([event['automaticType'] for event in payload['events']], ['unassigned', 'unassigned'])
+        self.assertTrue(all(event['source'] == 'kinetra-onset' for event in payload['events']))
+        self.assertTrue(payload['transcription']['fallbackUsed'])
+        self.assertIn('Human classification required', payload['transcription']['warnings'][0])
 
     @patch('analysis.services.estimate_pitch', return_value=(82.41, .86))
     @patch('analysis.services.spectral_onsets', return_value=[100, 600])
@@ -111,6 +135,9 @@ class TeleoExperienceBuilderTests(TestCase):
         self.assertEqual(times, sorted(times))
         self.assertEqual(payload['format'], 'teleo-music')
         self.assertEqual(payload['version'], 1)
+        self.assertEqual(len(payload['drums']['kick']['events']), 1)
+        self.assertEqual(payload['drums']['snare']['events'], [])
+        self.assertIn('hiHat', payload['drums'])
         self.assertLess(path.stat().st_size, 10_000)
 
     def test_builder_does_not_mix_artifacts_from_previous_job(self):

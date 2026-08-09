@@ -24,11 +24,31 @@ TeleoExperienceBuilder
 teleo_experience.json
 ```
 
+La rama de batería dentro de ese flujo es:
+
+```text
+drums.wav
+  ├─→ AutomaticDrumTranscriptionService → ADTOF backend → class + onset
+  └─→ DrumOnsetDetector → possible hits + audio intensity
+                              ↓
+                    DrumEventFusionService (±50 ms)
+                              ↓
+                  automatic DrumEvents (RAW)
+                              ↓
+                    DrumsPostProcessor
+                              ↓
+          Review Editor → reviewed/vN/drums.json
+                              ↓
+              teleo_experience.reviewed.json
+```
+
+MIDI es exclusivamente el transporte intermedio del adapter ADTOF. No forma parte del dominio principal, de los artifacts Teleo ni de `teleo_experience*.json`.
+
 ## Analizadores
 
 | Analizador | Algoritmo inicial | Salida | Limitación principal |
 | --- | --- | --- | --- |
-| `DrumsAnalyzer` | `RhythmExtractor2013`, flujo espectral y distribución de energía por bandas | eventos, duración, tipo, intensidad y confianza | Clasificación conservadora; usa `unknown` cuando no hay evidencia suficiente. Crash/cymbal quedan preparados pero requieren un modelo especializado. |
+| `DrumsAnalyzer` | ADTOF opcional para familia/onset + detector local para onsets/intensidad + fusión temporal | eventos automáticos, duración, tipo, intensidad y metadata del backend | ADTOF solo propone kick/snare/hi-hat/tom/cymbal y no entrega confidence por evento. Crash/splash/ride son refinamientos humanos. |
 | `BassAnalyzer` | onsets por flujo espectral, pitch por autocorrelación | notas con rango, Hz, MIDI, nombre, intensidad y confianza | Omite pitch/MIDI cuando la confianza es menor a 0.45. |
 | `GuitarAnalyzer` | igual que bass, con rango de guitarra y descriptor de ataque | notas y ataque | Aproximación monofónica; acordes pueden no transcribirse correctamente. |
 | `PianoAnalyzer` | onsets y pitch conservador | colección de notas | El schema permite notas simultáneas, pero el algoritmo inicial no es una transcripción polifónica completa. |
@@ -57,6 +77,8 @@ media/tracks/<track_uuid>/analysis/<job_uuid>/
 Esto conserva resultados históricos y evita contaminación entre reprocesamientos.
 
 Cada processed artifact contiene un bloque `quality`. Teleo Experience expone esos bloques en `channelsQuality`; los eventos de canales `unreliable` no entran en las colecciones de render ni en la timeline.
+
+`raw/drums.json` añade `transcription`: backend, versión, device efectivo, tiempo, clases, conteos, matching, warnings y uso de fallback. La misma metadata se copia a `ProcessingJob.metadata.drumTranscription` para observabilidad. Un evento ADTOF emparejado toma intensidad del audio local; uno ADTOF sin onset local se conserva; un onset local sin ADTOF se conserva como `UNASSIGNED` con `source: "kinetra-onset"`.
 
 ## Analysis Lab
 

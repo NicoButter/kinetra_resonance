@@ -23,10 +23,10 @@
       </select>
     </label>
     <label>Playback speed <select id="playback-speed"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1.0×</option><option value="1.25">1.25×</option></select></label>
-    <fieldset><legend>View mode</legend><label><input type="radio" name="artifact-stage" value="raw"> RAW</label><label><input type="radio" name="artifact-stage" value="processed"> PROCESSED</label><label><input type="radio" name="artifact-stage" value="reviewed" checked> REVIEWED</label></fieldset>
-    <label>Minimum AI confidence <output id="confidence-value">0.00</output><input id="confidence-filter" type="range" min="0" max="1" step="0.05" value="0"></label>
+    <fieldset><legend>Artifact stage</legend><label><input type="radio" name="artifact-stage" value="raw"> RAW</label><label><input type="radio" name="artifact-stage" value="processed"> PROCESSED</label><label><input type="radio" name="artifact-stage" value="reviewed" checked> REVIEWED</label></fieldset>
+    <label>Minimum AI confidence (when available) <output id="confidence-value">0.00</output><input id="confidence-filter" type="range" min="0" max="1" step="0.05" value="0"></label>
     <label><input id="low-confidence-only" type="checkbox"> Show low AI confidence only</label>
-    <label>Timeline zoom <select id="timeline-zoom"><option value="1">1 second · detailed</option><option value="2">2 seconds · detailed</option><option value="3">3 seconds · detailed</option><option value="5">5 seconds</option><option value="10">10 seconds</option><option value="15" selected>15 seconds</option><option value="20">20 seconds</option><option value="30">30 seconds</option></select></label>
+    <label class="timeline-zoom">Horizontal zoom <output id="timeline-zoom-value">15.00 s</output><input id="timeline-zoom" type="range" min="0.25" max="30" step="0.25" value="15" aria-label="Horizontal timeline zoom"></label>
 
     <details id="drum-filter-panel" open>
       <summary>Drum filters</summary>
@@ -49,7 +49,7 @@
       <label><input id="show-deleted" type="checkbox"> Show deleted events</label>
     </details>
 
-    <div class="button-row"><button id="previous-unassigned" class="button secondary" type="button">Previous unassigned</button><button id="next-unassigned" class="button secondary" type="button">Next unassigned</button></div>
+    <div class="button-row"><button id="previous-unreviewed" class="button secondary" type="button">Previous unreviewed</button><button id="next-unreviewed" class="button secondary" type="button">Next unreviewed</button></div>
     <div class="button-row"><button id="previous-event" class="button secondary" type="button">Previous event</button><button id="next-event" class="button secondary" type="button">Next event</button></div>
     <div class="button-row"><button id="review-undo" class="button secondary" type="button">Undo</button><button id="review-redo" class="button secondary" type="button">Redo</button></div>
     <p id="save-status" class="save-saved">Saved</p>
@@ -58,7 +58,7 @@
     <label class="rapid-review-toggle"><input id="rapid-drum-review" type="checkbox"> Rapid Drum Review</label>
 
     <details><summary>Keyboard shortcuts</summary><dl class="shortcuts">
-      <dt>Space</dt><dd>Play/pause</dd><dt>A</dt><dd>Audition selected hit</dd><dt>K/S/H/T</dt><dd>Kick/Snare/Hi-hat/Tom</dd><dt>C/P/R/Y</dt><dd>Crash/Splash/Ride/Cymbal</dd><dt>U/N</dt><dd>Unassigned/Unknown</dd><dt>[ / ]</dt><dd>Previous/next unassigned</dd><dt>Shift + drag</dt><dd>Move timestamp</dd><dt>Delete</dt><dd>Delete selected</dd><dt>Ctrl+Z / Ctrl+Y</dt><dd>Undo / Redo batch</dd>
+      <dt>Space</dt><dd>Play/pause</dd><dt>A</dt><dd>Audition selected hit</dd><dt>Enter</dt><dd>Confirm selected AI suggestion</dd><dt>K/S/H/T</dt><dd>Kick/Snare/Hi-hat/Tom</dd><dt>C/P/R/Y</dt><dd>Crash/Splash/Ride/Cymbal</dd><dt>U/N</dt><dd>Unassigned/Unknown</dd><dt>[ / ]</dt><dd>Previous/next unreviewed</dd><dt>Shift + drag</dt><dd>Move timestamp</dd><dt>Delete</dt><dd>Delete selected</dd><dt>Ctrl+Z / Ctrl+Y</dt><dd>Undo / Redo batch</dd>
     </dl></details>
     <h3>Quality status</h3><div id="quality-panel"></div>
   </aside>
@@ -70,7 +70,7 @@
       <div class="drum-assign-buttons">
         <button type="button" data-assign-drum="kick">Kick</button><button type="button" data-assign-drum="snare">Snare</button><button type="button" data-assign-drum="hi_hat">Hi-hat</button><button type="button" data-assign-drum="tom">Tom</button><button type="button" data-assign-drum="crash">Crash</button><button type="button" data-assign-drum="splash">Splash</button><button type="button" data-assign-drum="ride">Ride</button><button type="button" data-assign-drum="cymbal">Cymbal</button><button type="button" data-assign-drum="unknown">Unknown</button><button type="button" data-assign-drum="unassigned">Unassigned</button>
       </div>
-      <div class="button-row"><button id="audition-hit" class="button secondary" type="button">▶ Audition Hit</button><button id="delete-selected" class="button secondary danger" type="button">Delete selected</button></div>
+      <div class="button-row"><button id="audition-hit" class="button secondary" type="button">▶ Audition Hit</button><button id="confirm-ai-suggestion" class="button secondary" type="button">Confirm AI suggestion</button><button id="delete-selected" class="button secondary danger" type="button">Delete selected</button></div>
       <div class="drum-add"><select id="add-drum-type"><option value="kick">Kick</option><option value="snare">Snare</option><option value="hi_hat">Hi-hat</option><option value="tom">Tom</option><option value="crash">Crash</option><option value="splash">Splash</option><option value="ride">Ride</option><option value="cymbal">Cymbal</option><option value="unknown">Unknown</option></select><button id="add-drum-event" class="button" type="button">Add Drum Event at playhead</button></div>
       <small>Drag an empty timeline area left/right to pan. Normal vertical drag assigns a lane. Shift + horizontal drag changes timeMs. Alt + drag selects a group of hits.</small>
     </section>
@@ -87,7 +87,7 @@
   <aside class="panel review-inspector"><h2>Event inspector</h2><div id="event-inspector">Select an event or double-click a track to add one.</div><hr><h3>Continuous ranges</h3><p class="muted">Creates a 1-second review range at the playhead.</p><div class="button-grid"><button type="button" data-range="voice_active">Voice active</button><button type="button" data-range="silence">Silence</button><button type="button" data-range="suspicious">Suspicious</button><button type="button" data-range="unreliable">Other unreliable</button><button type="button" data-range="exclude">Exclude other</button></div></aside>
 </div>
 
-<section class="panel review-finish"><h2>Complete review</h2><p>Materializes reviewed artifacts, validates quality and generates the human-reviewed Teleo Experience. Unassigned drum hits are allowed, but will produce a warning and use their AI prediction as effective fallback.</p><button id="finish-review" class="button" type="button">Finish Human Review</button><pre id="finish-summary"></pre></section>
+<section class="panel review-finish"><h2>Complete review</h2><p>Materializes reviewed artifacts, validates quality and generates the human-reviewed Teleo Experience. Pending hits are allowed with a warning; an AI family is used only when that event actually has one.</p><button id="finish-review" class="button" type="button">Finish Human Review</button><pre id="finish-summary"></pre></section>
 {% csrf_token %}
 {{ lab_config|json_script:"lab-config" }}
 <script src="{% static 'js/lab.js' %}"></script>

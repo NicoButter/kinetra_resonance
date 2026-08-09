@@ -84,9 +84,10 @@ class ProcessingCommandTests(TestCase):
         stems = {stem_type: Stem.objects.create(track=job.track, type=stem_type, file=f'tracks/{job.track_id}/stems/{stem_type.lower()}.wav') for stem_type in StemSeparationService.PROFILE_STEMS[job.profile]}
         separate.return_value = SeparationResult(job.profile, job.separator_model, stems)
         artifact_path = TEST_MEDIA / 'tracks' / str(job.track_id) / 'analysis' / 'artifact.json'
-        analyze.return_value = ({'durationMs': 1000}, artifact_path)
+        analyze.return_value = ({'durationMs': 1000, 'transcription': {'backend': 'adtof', 'device': 'cpu', 'processingTime': 1.2}}, artifact_path)
         build.return_value = ({'version': 1}, TEST_MEDIA / 'tracks' / str(job.track_id) / 'analysis' / 'teleo_experience.json')
         call_command('process_track', str(job.id))
         job.refresh_from_db()
         self.assertEqual(job.status, ProcessingJob.Status.COMPLETED)
         self.assertEqual(job.analysis_artifacts.count(), 7)
+        self.assertEqual(job.metadata['drumTranscription']['backend'], 'adtof')
