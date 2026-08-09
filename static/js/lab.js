@@ -617,13 +617,25 @@
     } catch (error) { window.alert(error.message); }
   });
 
+  async function togglePlayback() {
+    if (audio.paused) {
+      try { await audio.play(); } catch (error) { setSaveStatus(`Playback failed: ${error.message}`, 'error'); }
+    } else {
+      audio.pause();
+    }
+  }
+
   document.addEventListener('keydown', event => {
     if (!editor) return;
     const tag = event.target.tagName;
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag) || event.target.isContentEditable) return;
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); cursor('undo'); return; }
     if ((event.ctrlKey || event.metaKey) && (event.key.toLowerCase() === 'y' || (event.shiftKey && event.key.toLowerCase() === 'z'))) { event.preventDefault(); cursor('redo'); return; }
-    if (event.code === 'Space') { event.preventDefault(); audio.paused ? audio.play() : audio.pause(); return; }
+    if (event.code === 'Space' || event.key === ' ') {
+      event.preventDefault();
+      if (!event.repeat) togglePlayback();
+      return;
+    }
     if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); const delta = (event.shiftKey ? 1 : 0.1) * (event.key === 'ArrowLeft' ? -1 : 1); audio.currentTime = Math.max(0, Math.min(audio.duration || Infinity, audio.currentTime + delta)); return; }
     if (event.key === '[') { event.preventDefault(); navigateUnassigned(-1); return; }
     if (event.key === ']') { event.preventDefault(); navigateUnassigned(1); return; }
@@ -633,7 +645,7 @@
     const assignments = {k: 'kick', s: 'snare', h: 'hi_hat', t: 'tom', c: 'crash', p: 'splash', r: 'ride', y: 'cymbal', u: 'unassigned', n: 'unknown'};
     const piece = assignments[event.key.toLowerCase()];
     if (piece) { event.preventDefault(); assignSelected(piece); }
-  });
+  }, {capture: true});
 
   const artifactLoads = Object.entries(config.artifacts).flatMap(([artifactStage, urls]) => Object.entries(urls).map(async ([channel, url]) => { const response = await fetch(url); if (!response.ok) throw new Error(`Could not load ${artifactStage}/${channel}`); data[artifactStage][channel] = await response.json(); }));
   Promise.all(artifactLoads).then(async () => { rebuildIndices('raw'); rebuildIndices('processed'); if (editor) await loadReviewed(); else updatePanels(); updateEditorMode(); }).catch(error => { counts.textContent = error.message; });
