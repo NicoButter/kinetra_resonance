@@ -103,6 +103,7 @@ def track_detail(request, track_id):
     if not vocal_lip_sync:
         vocal_lip_sync = RhubarbHealthCheck().check()
         vocal_lip_sync['status'] = 'available' if vocal_lip_sync['available'] else 'unavailable'
+        vocal_lip_sync['backendVersion'] = vocal_lip_sync.get('version')
     return render(request, 'tracks/track_detail.html', {'track': track, 'job': job, 'artifact_rows': artifact_rows, 'experience': experience, 'reviewed_experience': reviewed_experience, 'drum_transcription': drum_transcription, 'vocal_lip_sync': vocal_lip_sync, 'reprocess_form': ReprocessTrackForm(), 'can_delete': can_delete})
 
 
@@ -192,6 +193,8 @@ def review_editor(request, job_id):
         'editor': True, 'jobId': str(job.id), 'durationMs': job.track.duration_ms,
         'audioSources': audio_sources, 'artifacts': artifact_urls,
         'windowBeforeMs': 5000, 'windowAfterMs': 10000,
+        'mouthTransitionMs': settings.MOUTH_PREVIEW_TRANSITION_MS,
+        'seekSnapThresholdMs': 250,
         'review': {
             'sessionId': str(session.id), 'status': session.status,
             'reviewVersion': session.review_version, 'version': session.version,

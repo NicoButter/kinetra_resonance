@@ -75,7 +75,15 @@
       <small>Drag an empty timeline area left/right to pan. Normal vertical drag assigns a lane. Shift + horizontal drag changes timeMs. Alt + drag selects a group of hits.</small>
     </section>
     <section id="vocal-toolbar" class="panel" hidden><strong>Rapid Vocal Review</strong><span class="muted"> Select a cue, audition it, then confirm or override its mouth shape.</span><div class="button-row"><button id="audition-viseme" class="button secondary" type="button">▶ Play cue</button><button id="confirm-viseme" class="button secondary" type="button">Confirm viseme</button><button id="add-viseme" class="button secondary" type="button">Add mouth cue at playhead</button></div></section>
-    <section id="mouth-preview-panel" class="panel" hidden><h2>VOICE / MOUTH PREVIEW</h2><div id="mouth-preview"></div><label><input id="use-vocal-intensity" type="checkbox" checked> Use vocal intensity</label><label><input id="mouth-debug-toggle" type="checkbox"> Debug</label><p id="mouth-debug" class="muted" hidden></p></section>
+    <section id="mouth-preview-panel" class="panel mouth-preview-panel" hidden>
+      <div class="mouth-preview-heading"><div><p class="eyebrow">VOCALS</p><h2>MOUTH PREVIEW</h2></div><span id="mouth-renderer-status" class="muted">SVG</span></div>
+      <div id="mouth-preview" class="mouth-preview-stage"></div>
+      <div class="mouth-preview-readout"><strong id="mouth-current-viseme">Viseme: X</strong><span id="mouth-current-source">No active cue</span><span id="mouth-current-expression">Intensity: 0.00</span></div>
+      <div id="mouth-comparator" class="mouth-comparator"><span>Previous: —</span><strong>Current: X</strong><span>Next: —</span></div>
+      <label><input id="use-vocal-intensity" type="checkbox" checked> Use vocal intensity</label><label><input id="mouth-debug-toggle" type="checkbox"> Debug / preview shapes</label>
+      <div id="mouth-shape-controls" class="mouth-shape-controls" hidden>{% for shape in 'ABCDEFGHX' %}<button type="button" data-mouth-shape="{{ shape }}">{{ shape }}</button>{% endfor %}</div>
+      <p id="mouth-debug" class="muted" hidden></p>
+    </section>
     <section class="panel lab-canvas-wrap"><canvas id="analysis-canvas" aria-label="Human review timeline editor"></canvas><div class="lab-legend"><span id="window-before">−5 s</span><strong>playhead</strong><span id="window-after">+10 s</span></div></section>
     <footer class="review-transport">
       <div class="review-scrubber">
@@ -92,5 +100,5 @@
 <section class="panel review-finish"><h2>Complete review</h2><p>Materializes reviewed artifacts, validates quality and generates the human-reviewed Teleo Experience. Pending hits are allowed with a warning; an AI family is used only when that event actually has one.</p><button id="finish-review" class="button" type="button">Finish Human Review</button><pre id="finish-summary"></pre></section>
 {% csrf_token %}
 {{ lab_config|json_script:"lab-config" }}
-<script src="{% static 'js/mouth-preview.js' %}"></script><script src="{% static 'js/lab.js' %}"></script>
+<script src="{% static 'vendor/animejs/anime.umd.min.js' %}"></script><script src="{% static 'js/mouth-preview-helpers.js' %}"></script><script src="{% static 'js/mouth-shapes.js' %}"></script><script src="{% static 'js/mouth-renderer.js' %}"></script><script src="{% static 'js/svg-anime-mouth-renderer.js' %}"></script><script src="{% static 'js/lab.js' %}"></script>
 {% endblock %}

@@ -1,0 +1,10 @@
+const assert = require('node:assert/strict');
+const {validShape, effectiveShape, activeViseme, isSeekJump} = require('./mouth-preview-helpers.js');
+const cues = [{startMs: 100, endMs: 200, automaticShape: 'D'}, {startMs: 200, endMs: 300, automaticShape: 'A', reviewedShape: 'C'}];
+assert.equal(validShape('Z'), 'X');
+assert.equal(effectiveShape(cues[1]), 'C');
+assert.equal(activeViseme(cues, 200), cues[1]);
+assert.equal(activeViseme(cues, 300), null);
+assert.equal(isSeekJump(100, 350, 250), false);
+assert.equal(isSeekJump(100, 351, 250), true);
+console.log('mouth-preview helpers: ok');

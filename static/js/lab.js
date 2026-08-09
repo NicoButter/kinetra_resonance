@@ -66,7 +66,28 @@
   const checked = id => Boolean(document.querySelector(id)?.checked);
   const isDrumLaneMode = () => editor && selectedChannel === 'drums';
   const isVisemeLaneMode = () => editor && selectedChannel === 'vocals' && (data[stage].vocals?.visemes?.length || 0) > 0;
-  const mouthPreview = window.MouthPreview && document.querySelector('#mouth-preview') ? new window.MouthPreview(document.querySelector('#mouth-preview')) : null;
+  const mouthPreview = window.SvgAnimeMouthRenderer && document.querySelector('#mouth-preview') ? new window.SvgAnimeMouthRenderer(document.querySelector('#mouth-preview'), {transitionMs: config.mouthTransitionMs || 70}) : null;
+  const mouthHelpers = window.MouthPreviewHelpers;
+  let previousMouthTimeMs = null;
+  let lastMouthIntensity = null;
+  let lastMouthPitch = null;
+  let lastMouthPresence = null;
+  let developerShape = null;
+  const visemeOpenness = {A: 3, B: 12, C: 24, D: 42, E: 28, F: 11, G: 15, H: 20, X: 5};
+
+  function drawVisemeReference(shape, x, y) {
+    const opening = visemeOpenness[shape] || visemeOpenness.X;
+    const rounded = shape === 'E' || shape === 'F';
+    context.save();
+    context.fillStyle = '#241c2a'; context.strokeStyle = '#f5b879'; context.lineWidth = 2;
+    context.beginPath();
+    context.moveTo(x, y); context.quadraticCurveTo(x + 17, y - opening / 3, x + 34, y);
+    context.quadraticCurveTo(x + 17, y + opening / 3, x, y); context.closePath(); context.fill(); context.stroke();
+    if (['B', 'G'].includes(shape)) { context.fillStyle = '#fff5dc'; context.fillRect(x + 9, y - 3, 16, 3); }
+    if (shape === 'H') { context.fillStyle = '#ff8fc8'; context.beginPath(); context.ellipse(x + 17, y + 4, 8, 2.5, 0, 0, Math.PI * 2); context.fill(); }
+    if (rounded) { context.strokeStyle = '#f5b879'; context.beginPath(); context.arc(x + 17, y, 11, 0, Math.PI * 2); context.stroke(); }
+    context.restore();
+  }
 
   config.audioSources.forEach(source => {
     const option = new Option(source.label, source.url);
@@ -207,6 +228,36 @@
     if (filters) filters.hidden = !isDrumLaneMode();
     const vocalToolbar = document.querySelector('#vocal-toolbar'); if (vocalToolbar) vocalToolbar.hidden = !isVisemeLaneMode();
     const preview = document.querySelector('#mouth-preview-panel'); if (preview) preview.hidden = !isVisemeLaneMode();
+  }
+
+  function updateMouthPreview(nowMs) {
+    if (!mouthPreview || !isVisemeLaneMode()) return;
+    const cues = indices[stage].vocals || [];
+    const cue = mouthHelpers.activeViseme(cues, nowMs);
+    const frames = data[stage].vocals?.frames || [];
+    let frame = null;
+    for (let index = frames.length - 1; index >= 0; index -= 1) { if (frames[index].timeMs <= nowMs) { frame = frames[index]; break; } }
+    const shape = developerShape && audio.paused ? developerShape : mouthHelpers.effectiveShape(cue);
+    const immediate = mouthHelpers.isSeekJump(previousMouthTimeMs, nowMs, config.seekSnapThresholdMs || 250);
+    mouthPreview.setViseme(shape, {immediate});
+    const intensity = checked('#use-vocal-intensity') ? Number(cue?.intensity ?? 0) : .5;
+    const pitch = cue?.pitchNormalized;
+    const presence = frame?.presence ?? 1;
+    if (lastMouthIntensity == null || Math.abs(lastMouthIntensity - intensity) >= .02) { mouthPreview.setIntensity(intensity); lastMouthIntensity = intensity; }
+    if (lastMouthPitch == null || Math.abs(lastMouthPitch - Number(pitch ?? .5)) >= .03) { mouthPreview.setPitch(pitch); lastMouthPitch = Number(pitch ?? .5); }
+    if (lastMouthPresence == null || Math.abs(lastMouthPresence - presence) >= .03) { mouthPreview.setPresence(presence); lastMouthPresence = presence; }
+    previousMouthTimeMs = nowMs;
+    const source = cue?.reviewedShape ? 'Human override' : cue ? 'AI / Rhubarb' : 'No active cue';
+    const cueIndex = cue ? cues.indexOf(cue) : -1;
+    const previous = cueIndex > 0 ? mouthHelpers.effectiveShape(cues[cueIndex - 1]) : '—';
+    const next = cueIndex >= 0 && cueIndex < cues.length - 1 ? mouthHelpers.effectiveShape(cues[cueIndex + 1]) : '—';
+    const current = document.querySelector('#mouth-current-viseme'); const currentSource = document.querySelector('#mouth-current-source'); const expression = document.querySelector('#mouth-current-expression'); const comparator = document.querySelector('#mouth-comparator'); const rendererStatus = document.querySelector('#mouth-renderer-status');
+    if (current) current.textContent = `Viseme: ${shape}`;
+    if (currentSource) currentSource.textContent = source;
+    if (expression) expression.textContent = `Intensity: ${intensity.toFixed(2)}`;
+    if (comparator) comparator.innerHTML = `<span>Previous: ${previous}</span><strong>Current: ${shape}</strong><span>Next: ${next}</span>`;
+    if (rendererStatus) rendererStatus.textContent = mouthPreview.element?.dataset.rendererMode === 'anime' ? 'SVG · Anime.js' : 'SVG · snap fallback';
+    const debug = document.querySelector('#mouth-debug'); if (debug) { debug.hidden = !checked('#mouth-debug-toggle'); debug.textContent = `Current time: ${(nowMs / 1000).toFixed(3)} s · Current viseme: ${shape} · Cue: ${cue ? `${(cue.startMs / 1000).toFixed(3)}–${(cue.endMs / 1000).toFixed(3)}` : '—'} · Intensity: ${intensity.toFixed(2)}`; }
   }
 
   async function loadReviewed() {
@@ -375,11 +426,11 @@
 
   function renderVisemeLanes(windowData) {
     const shapes = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'X']; const laneHeight = 42;
-    const {width, height} = resizeCanvas(shapes.length * laneHeight + 18); const plotLeft = 54; const plotWidth = width - plotLeft - 16;
+    const {width, height} = resizeCanvas(shapes.length * laneHeight + 18); const plotLeft = 104; const plotWidth = width - plotLeft - 16;
     const xFor = time => plotLeft + ((time - windowData.startMs) / (windowData.endMs - windowData.startMs)) * plotWidth;
     renderWindow = {...windowData, plotLeft, plotWidth, laneHeight, xFor}; context.clearRect(0, 0, width, height); drawCache = [];
-    shapes.forEach((shape, row) => { const top = 8 + row * laneHeight; context.fillStyle = '#eff2f8'; context.fillText(shape, 18, top + 25); context.strokeStyle = '#2a3140'; context.beginPath(); context.moveTo(plotLeft, top + laneHeight); context.lineTo(width, top + laneHeight); context.stroke(); });
-    visibleItems('vocals', windowData.startMs, windowData.endMs).forEach(cue => { const shape = cue.effectiveShape || cue.reviewedShape || cue.automaticShape || cue.shape; const row = shapes.indexOf(shape); if (row < 0) return; const x0 = xFor(cue.startMs), x1 = Math.max(x0 + 3, xFor(cue.endMs)), top = 8 + row * laneHeight + 7; context.fillStyle = cue.reviewedShape || cue.source === 'human' ? '#79f5ce' : '#f5b879'; context.fillRect(x0, top, x1 - x0, laneHeight - 14); context.fillStyle = '#17202e'; context.fillText(cue.reviewStatus === 'UNREVIEWED' ? 'AI' : shape, x0 + 3, top + 18); drawCache.push({item: cue, channel: 'vocals', x0, x1, y0: top, y1: top + laneHeight - 14}); });
+    shapes.forEach((shape, row) => { const top = 8 + row * laneHeight; context.fillStyle = '#eff2f8'; context.fillText(shape, 14, top + 25); drawVisemeReference(shape, 38, top + 20); context.strokeStyle = '#2a3140'; context.beginPath(); context.moveTo(plotLeft, top + laneHeight); context.lineTo(width, top + laneHeight); context.stroke(); });
+    visibleItems('vocals', windowData.startMs, windowData.endMs).forEach(cue => { const shape = cue.effectiveShape || cue.reviewedShape || cue.automaticShape || cue.shape; const row = shapes.indexOf(shape); if (row < 0) return; const x0 = xFor(cue.startMs), x1 = Math.max(x0 + 3, xFor(cue.endMs)), top = 8 + row * laneHeight + 7; context.fillStyle = cue.reviewedShape || cue.source === 'human' ? '#79f5ce' : '#f5b879'; context.fillRect(x0, top, x1 - x0, laneHeight - 14); context.fillStyle = '#17202e'; context.fillText(shape, x0 + 3, top + 18); drawCache.push({item: cue, channel: 'vocals', x0, x1, y0: top, y1: top + laneHeight - 14}); });
     const playhead = xFor(windowData.nowMs); context.strokeStyle = '#fff'; context.beginPath(); context.moveTo(playhead, 0); context.lineTo(playhead, height); context.stroke();
   }
 
@@ -389,7 +440,7 @@
     if (beforeLabel) beforeLabel.textContent = `−${(windowData.beforeMs / 1000).toFixed(1)} s`;
     if (afterLabel) afterLabel.textContent = `+${(windowData.afterMs / 1000).toFixed(1)} s`;
     if (isDrumLaneMode()) renderDrumLanes(windowData); else if (isVisemeLaneMode()) renderVisemeLanes(windowData); else renderClassic(windowData);
-    if (mouthPreview && isVisemeLaneMode()) { const cue = (indices[stage].vocals || []).find(item => item.startMs <= windowData.nowMs && windowData.nowMs < item.endMs); mouthPreview.setShape(cue?.reviewedShape ?? cue?.automaticShape ?? cue?.effectiveShape ?? cue?.shape ?? 'X'); mouthPreview.setIntensity(cue?.intensity ?? .5); const debug = document.querySelector('#mouth-debug'); if (debug) { debug.hidden = !checked('#mouth-debug-toggle'); debug.textContent = `Current time: ${(windowData.nowMs / 1000).toFixed(3)} s · Current viseme: ${cue?.reviewedShape ?? cue?.automaticShape ?? cue?.effectiveShape ?? cue?.shape ?? 'X'} · Cue: ${cue ? `${(cue.startMs / 1000).toFixed(3)}–${(cue.endMs / 1000).toFixed(3)}` : '—'} · Intensity: ${Number(cue?.intensity ?? 0).toFixed(2)}`; } }
+    updateMouthPreview(windowData.nowMs);
     const current = document.querySelector('#current-time'); const total = document.querySelector('#total-time');
     if (current) current.textContent = formatTime(audio.currentTime);
     if (total) total.textContent = formatTime(audio.duration || (config.durationMs || 0) / 1000);
@@ -701,7 +752,10 @@
   document.querySelector('#audition-viseme')?.addEventListener('click', auditionViseme);
   document.querySelector('#confirm-viseme')?.addEventListener('click', () => { const item = selectedEvent(); if (item) saveAction('CONFIRM_VISEME', {eventId: item.id}, 'vocals'); });
   document.querySelector('#add-viseme')?.addEventListener('click', () => saveAction('ADD', {event: {startMs: Math.round(audio.currentTime * 1000), endMs: Math.min(config.durationMs, Math.round(audio.currentTime * 1000 + 150)), shape: 'X', intensity: .5}}, 'vocals'));
-  document.querySelector('#use-vocal-intensity')?.addEventListener('change', event => mouthPreview?.setUseIntensity(event.target.checked));
+  document.querySelector('#use-vocal-intensity')?.addEventListener('change', () => { lastMouthIntensity = null; });
+  document.querySelector('#mouth-debug-toggle')?.addEventListener('change', event => { const controls = document.querySelector('#mouth-shape-controls'); if (controls) controls.hidden = !event.target.checked; if (!event.target.checked) developerShape = null; });
+  document.querySelectorAll('[data-mouth-shape]').forEach(button => button.addEventListener('click', () => { developerShape = button.dataset.mouthShape; mouthPreview?.setViseme(developerShape); }));
+  audio.addEventListener('ended', () => { previousMouthTimeMs = null; developerShape = null; mouthPreview?.reset(); });
   document.querySelector('#review-undo')?.addEventListener('click', () => cursor('undo'));
   document.querySelector('#review-redo')?.addEventListener('click', () => cursor('redo'));
   document.querySelector('#previous-unreviewed')?.addEventListener('click', () => navigateUnreviewed(-1));

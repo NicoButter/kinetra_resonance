@@ -162,6 +162,10 @@ Para DRUMS funciona como un pequeño secuenciador de metadata. Una sugerencia au
 
 Al finalizar se generan `reviewed/v<version>/*.json` y `teleo_experience.reviewed.json`. Teleo deberá preferir esta experiencia cuando exista, aunque la integración API todavía no forma parte de este repositorio.
 
+### Mouth Preview Renderer
+
+El canal VOCALS del Review Editor representa los visemas de Rhubarb mediante `MouthRenderer` y su implementación local `SvgAnimeMouthRenderer`. La cadena es `Rhubarb visemes → MouthRenderer → SVG morphing`; usa `audio.currentTime` como único reloj y Anime.js 4.5.0 únicamente para suavizar transiciones entre poses A–H/X. El bundle y su licencia MIT están versionados en `static/vendor/animejs/`, por lo que no hace falta npm ni Internet al clonar el proyecto. Es una herramienta de auditoría de Kinetra Resonance, no el renderer final de Teleo.
+
 Kinetra Resonance no descarga música ni elude DRM. Las personas usuarias son responsables de procesar únicamente audio para el que tengan autorización legal.
 
 ## Licencia

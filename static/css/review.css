@@ -99,6 +99,28 @@
   padding: 12px 16px;
 }
 
+.mouth-preview-panel { margin-top: 14px; overflow: hidden; }
+.mouth-preview-heading { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+.mouth-preview-heading h2 { margin: 0; }
+.mouth-preview-stage { min-height: 280px; display: grid; place-items: center; margin: 12px 0; border: 1px solid var(--line); border-radius: 10px; background: radial-gradient(circle at 50% 38%, #252c3c, #10141d 70%); }
+.mouth-rig { width: min(100%, 480px); max-height: 290px; overflow: visible; }
+.mouth-nose-guide, .mouth-jaw-guide { fill: none; stroke: #7e8290; stroke-width: 2; opacity: .42; }
+.mouth-interior { fill: #241c2a; stroke: #120d16; stroke-width: 2; }
+.mouth-upper-lip, .mouth-lower-lip { fill: none; stroke: #f5a99d; stroke-width: 10; stroke-linecap: round; stroke-linejoin: round; }
+.mouth-upper-teeth { fill: #fff7e7; transition: opacity 50ms linear; }
+.mouth-tongue { fill: #e9829d; transition: opacity 50ms linear; }
+.mouth-expression { transform-origin: 110px 85px; transition: transform 90ms ease-out; }
+.mouth-targets { display: none; }
+.mouth-preview-readout, .mouth-comparator { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px 16px; text-align: center; }
+.mouth-preview-readout strong { color: var(--accent); }
+.mouth-preview-readout span, .mouth-comparator span { color: var(--muted); }
+.mouth-comparator { margin: 10px 0; padding: 8px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font-size: 13px; }
+.mouth-shape-controls { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.mouth-shape-controls button { min-width: 34px; border: 1px solid var(--line); border-radius: 5px; background: #10141d; color: var(--ink); cursor: pointer; }
+.mouth-shape-controls button:hover { border-color: var(--accent); color: var(--accent); }
+
+@media (prefers-reduced-motion: reduce) { .mouth-expression, .mouth-upper-teeth, .mouth-tongue { transition-duration: 0ms; } }
+
 .review-main .lab-canvas-wrap canvas.timeline-panning {
   cursor: grabbing;
 }
