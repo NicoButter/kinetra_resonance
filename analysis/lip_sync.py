@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import re
+import shutil
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -25,6 +28,83 @@ class LipSyncBackendUnavailable(LipSyncError):
     pass
 
 
+class RhubarbHealthCheck:
+    """Resolve and verify the external Rhubarb executable without running analysis.
+
+    ``binary`` is deliberately reduced to its basename in the default response so
+    callers can safely expose the result outside an admin/development context.
+    """
+    def __init__(self, binary: str | None = None, enabled: bool | None = None, runner=subprocess.run):
+        self.binary = binary if binary is not None else settings.RHUBARB_BINARY
+        self.enabled = settings.RHUBARB_ENABLED if enabled is None else enabled
+        self.runner = runner
+
+    @staticmethod
+    def local_project_binary() -> Path:
+        return settings.BASE_DIR / 'tools' / 'rhubarb' / 'Rhubarb-Lip-Sync-1.14.0-Linux' / 'rhubarb'
+
+    @staticmethod
+    def _validate(candidate: Path, source: str) -> tuple[Path | None, str | None]:
+        if not candidate.exists():
+            return None, f'Rhubarb {source} binary does not exist.'
+        if not candidate.is_file():
+            return None, f'Rhubarb {source} path is not a file.'
+        if not os.access(candidate, os.X_OK):
+            return None, f'Rhubarb {source} binary is not executable; run chmod +x on it.'
+        return candidate, None
+
+    def resolve(self) -> tuple[Path | None, str | None, str | None]:
+        """Return executable, source, and a safe diagnostic reason if unavailable."""
+        configured = str(self.binary or '').strip()
+        if configured:
+            configured_path = Path(configured).expanduser()
+            has_path = os.path.sep in configured or (os.path.altsep and os.path.altsep in configured)
+            if has_path:
+                binary, reason = self._validate(configured_path, 'configured')
+                return binary, 'environment', reason
+            path_binary = shutil.which(configured)
+            if path_binary:
+                binary, reason = self._validate(Path(path_binary), 'configured')
+                return binary, 'environment', reason
+            return None, 'environment', f'Configured RHUBARB_BINARY "{configured}" was not found on PATH.'
+
+        binary, reason = self._validate(self.local_project_binary(), 'local project')
+        if binary:
+            return binary, 'local_project', None
+        # A missing bundled binary is expected on installations that use PATH.
+        path_binary = shutil.which('rhubarb')
+        if path_binary:
+            binary, path_reason = self._validate(Path(path_binary), 'PATH')
+            return binary, 'path', path_reason
+        return None, None, reason or 'Rhubarb executable "rhubarb" was not found on PATH.'
+
+    def check(self, *, include_path: bool = False) -> dict:
+        configured = str(self.binary or '').strip()
+        result = {'enabled': self.enabled, 'available': False, 'binary': None,
+                  'version': None, 'recognizer': settings.RHUBARB_RECOGNIZER,
+                  'executable': False, 'source': None, 'reason': None}
+        if not self.enabled:
+            result['reason'] = 'Rhubarb is disabled by RHUBARB_ENABLED.'
+            return result
+        resolved, source, reason = self.resolve()
+        result.update({'source': source, 'binary': str(resolved) if include_path and resolved else (resolved.name if resolved else configured or None)})
+        if not resolved:
+            result['reason'] = reason
+            return result
+        result.update({'available': True, 'executable': True})
+        try:
+            completed = self.runner([str(resolved), '--version'], shell=False, capture_output=True, text=True, timeout=5, check=False)
+            if completed.returncode == 0:
+                version_output = (completed.stdout or completed.stderr).strip()
+                match = re.search(r'\b\d+(?:\.\d+)+\b', version_output)
+                result['version'] = match.group(0) if match else (version_output or None)
+            else:
+                result.update({'available': False, 'reason': 'Rhubarb could not report its version.'})
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            result.update({'available': False, 'reason': f'Rhubarb health check failed: {exc}'})
+        return result
+
+
 @dataclass
 class LipSyncResult:
     cues: list[dict] = field(default_factory=list)
@@ -33,7 +113,7 @@ class LipSyncResult:
     recognizer: str | None = None
     dialog_used: bool = False
     processing_time: float = 0.0
-    status: str = 'available'
+    status: str = 'success'
     warnings: list[str] = field(default_factory=list)
 
     def metadata(self):
@@ -79,7 +159,7 @@ class RhubarbLipSyncBackend:
     name = 'rhubarb'
     def __init__(self, binary: str | None = None, recognizer: str | None = None, extended_shapes: str | None = None,
                  timeout: int | None = None, runner=subprocess.run, adapter: RhubarbResultAdapter | None = None):
-        self.binary = binary or settings.RHUBARB_BINARY
+        self.binary = binary if binary is not None else settings.RHUBARB_BINARY
         self.recognizer = recognizer or settings.RHUBARB_RECOGNIZER
         self.extended_shapes = extended_shapes if extended_shapes is not None else settings.RHUBARB_EXTENDED_SHAPES
         self.timeout = timeout or settings.RHUBARB_TIMEOUT_SECONDS
@@ -91,26 +171,32 @@ class RhubarbLipSyncBackend:
         return 'pocketSphinx' if (language or '').lower().startswith('en') else 'phonetic'
 
     def version(self):
-        try:
-            completed = self.runner([self.binary, '--version'], shell=False, capture_output=True, text=True, timeout=5, check=False)
-        except (OSError, subprocess.TimeoutExpired): return None
-        return completed.stdout.strip() if completed.returncode == 0 else None
+        return RhubarbHealthCheck(self.binary, runner=self.runner).check()['version']
 
     def analyze(self, audio_path, *, language=None, dialog_path=None):
         audio = Path(audio_path)
         if not audio.is_file(): raise LipSyncError('vocals.wav is unavailable for lip-sync analysis.')
+        logger.info('[LIPSYNC] Resolving Rhubarb binary')
+        health = RhubarbHealthCheck(self.binary, runner=self.runner).check(include_path=True)
+        if not health['available']:
+            raise LipSyncBackendUnavailable(health['reason'] or 'Rhubarb Lip Sync backend unavailable')
+        binary = health['binary']
+        logger.info('[LIPSYNC] Binary source=%s path=%s', health['source'], binary)
+        logger.info('[LIPSYNC] Version: %s', health['version'])
         recognizer = self.recognizer_for(language, self.recognizer)
         if recognizer not in {'pocketSphinx', 'phonetic'}: raise LipSyncError('Invalid Rhubarb recognizer.')
+        logger.info('[LIPSYNC] Recognizer: %s', recognizer)
         # Never write alongside a media stem: the output belongs only to this invocation.
         with TemporaryDirectory(prefix='kinetra-rhubarb-') as temporary:
             output = Path(temporary) / 'rhubarb.json'
-            command = [self.binary, '--recognizer', recognizer, '--exportFormat', 'json', '--extendedShapes', self.extended_shapes, '--output', str(output)]
+            command = [binary, '-r', recognizer, '-f', 'json', '--extendedShapes', self.extended_shapes, '-o', str(output)]
             if dialog_path:
                 dialog = Path(dialog_path)
                 if not dialog.is_file(): raise LipSyncError('Configured Rhubarb dialog file does not exist.')
                 command.extend(['--dialogFile', str(dialog)])
             command.append(str(audio))
             started = time.perf_counter()
+            logger.info('[LIPSYNC] Starting Rhubarb')
             try:
                 completed = self.runner(command, shell=False, capture_output=True, text=True, timeout=self.timeout, check=False)
             except FileNotFoundError as exc: raise LipSyncBackendUnavailable('Rhubarb Lip Sync backend unavailable') from exc
@@ -120,7 +206,7 @@ class RhubarbLipSyncBackend:
             try:
                 payload = json.loads(output.read_text(encoding='utf-8'))
             except (OSError, json.JSONDecodeError) as exc: raise LipSyncError('Rhubarb returned invalid JSON.') from exc
-        return LipSyncResult(cues=self.adapter.convert(payload), backend=self.name, backend_version=self.version(), recognizer=recognizer,
+        return LipSyncResult(cues=self.adapter.convert(payload), backend=self.name, backend_version=health['version'], recognizer=recognizer,
                              dialog_used=bool(dialog_path), processing_time=time.perf_counter() - started)
 
 
@@ -139,13 +225,13 @@ class VocalLipSyncService:
             if duration_ms is not None:
                 result.cues = RhubarbResultAdapter().convert({'mouthCues': [{'start': cue['startMs'] / 1000, 'end': cue['endMs'] / 1000, 'value': cue['automaticShape']} for cue in result.cues]}, duration_ms)
             if not result.cues: raise LipSyncError('Rhubarb produced zero mouth cues.')
-            logger.info('Vocal lip sync backend=%s recognizer=%s cues=%s duration=%.3fs', result.backend, result.recognizer, len(result.cues), result.processing_time)
+            logger.info('[LIPSYNC] Rhubarb completed; mouth cues=%s normalized visemes=%s processing time=%.2fs', len(result.cues), len(result.cues), result.processing_time)
             return result
         except (LipSyncError, OSError) as exc:
             logger.warning('Rhubarb Lip Sync backend unavailable or failed: %s', exc)
             status = 'unavailable' if isinstance(exc, LipSyncBackendUnavailable) else 'failed'
             return LipSyncResult(backend='rhubarb', status=status, processing_time=time.perf_counter() - started,
-                                 warnings=['Rhubarb Lip Sync backend unavailable', self.WARNING, str(exc)])
+                                 warnings=[self.WARNING, str(exc)])
 
 
 class VocalCueEnrichmentService:
@@ -167,9 +253,9 @@ class VocalCueEnrichmentService:
 
 
 class VocalLipSyncQualityValidator:
-    def validate(self, cues, duration_ms, backend_status='available'):
+    def validate(self, cues, duration_ms, backend_status='success'):
         warnings = []
-        if backend_status != 'available': warnings.append('Lip-sync backend unavailable.')
+        if backend_status not in {'available', 'success'}: warnings.append('Lip-sync backend unavailable.')
         if not cues: warnings.append('No mouth cues were produced.')
         invalid = any(c['startMs'] < 0 or c['endMs'] <= c['startMs'] or c['endMs'] > duration_ms + 250 for c in cues)
         if invalid: warnings.append('Invalid mouth-cue timestamps.')

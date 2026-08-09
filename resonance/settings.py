@@ -13,8 +13,23 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 from pathlib import Path
 import os
 
+
+def load_local_environment(path: Path) -> None:
+    """Load a simple root .env without overriding the real process environment."""
+    if not path.is_file():
+        return
+    for raw_line in path.read_text(encoding='utf-8').splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith('#') or '=' not in line:
+            continue
+        key, value = line.split('=', 1)
+        key = key.strip()
+        if key and key not in os.environ:
+            os.environ[key] = value.strip().strip('"').strip("'")
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+load_local_environment(BASE_DIR / '.env')
 
 
 # Quick-start development settings - unsuitable for production
@@ -155,11 +170,13 @@ DRUM_REFRACTORY_CYMBAL_MS = int(os.environ.get('DRUM_REFRACTORY_CYMBAL_MS', '120
 REVIEW_MERGE_MAX_GAP_MS = int(os.environ.get('REVIEW_MERGE_MAX_GAP_MS', '250'))
 DRUM_AUDITION_BEFORE_MS = int(os.environ.get('DRUM_AUDITION_BEFORE_MS', '150'))
 DRUM_AUDITION_AFTER_MS = int(os.environ.get('DRUM_AUDITION_AFTER_MS', '350'))
-RHUBARB_ENABLED = os.environ.get('RHUBARB_ENABLED', 'True').lower() in {'1', 'true', 'yes'}
-RHUBARB_BINARY = os.environ.get('RHUBARB_BINARY', 'rhubarb')
-RHUBARB_RECOGNIZER = os.environ.get('RHUBARB_RECOGNIZER', 'auto')
+RHUBARB_ENABLED = os.environ.get('RHUBARB_ENABLED', 'true').lower() in {'1', 'true', 'yes'}
+# Empty means automatic resolution: bundled project binary, then PATH.
+RHUBARB_BINARY = os.environ.get('RHUBARB_BINARY', '').strip()
+RHUBARB_RECOGNIZER = os.environ.get('RHUBARB_RECOGNIZER', 'phonetic')
 RHUBARB_EXTENDED_SHAPES = os.environ.get('RHUBARB_EXTENDED_SHAPES', 'GHX')
 RHUBARB_TIMEOUT_SECONDS = int(os.environ.get('RHUBARB_TIMEOUT_SECONDS', '120'))
+LIPSYNC_REQUIRED = os.environ.get('LIPSYNC_REQUIRED', 'true').lower() in {'1', 'true', 'yes'}
 VOCAL_LANGUAGE = os.environ.get('VOCAL_LANGUAGE', 'es')
 MOUTH_PREVIEW_TRANSITION_MS = int(os.environ.get('MOUTH_PREVIEW_TRANSITION_MS', '70'))
 VOCAL_AUDITION_BEFORE_MS = int(os.environ.get('VOCAL_AUDITION_BEFORE_MS', '100'))

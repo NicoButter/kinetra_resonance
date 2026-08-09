@@ -10,6 +10,7 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 from django.views.decorators.csrf import ensure_csrf_cookie
 
 from analysis.models import AnalysisArtifact, ReviewSession
+from analysis.lip_sync import RhubarbHealthCheck
 from analysis.review import ReviewEngine, ReviewValidationError
 from processing.models import ProcessingJob
 from processing.services import StemSeparationService
@@ -91,7 +92,18 @@ def track_detail(request, track_id):
         ProcessingJob.Status.CANCELLED,
     }
     drum_transcription = (job.metadata or {}).get('drumTranscription') if job else None
-    return render(request, 'tracks/track_detail.html', {'track': track, 'job': job, 'artifact_rows': artifact_rows, 'experience': experience, 'reviewed_experience': reviewed_experience, 'drum_transcription': drum_transcription, 'reprocess_form': ReprocessTrackForm(), 'can_delete': can_delete})
+    vocal_lip_sync = (job.metadata or {}).get('vocalLipSync') if job else None
+    vocals_artifact = artifacts.get(AnalysisArtifact.Type.VOCALS)
+    if vocal_lip_sync and vocals_artifact:
+        try:
+            with vocals_artifact.json_file.open('r') as artifact_file:
+                vocal_lip_sync = {**vocal_lip_sync, 'visemeCount': len(json.load(artifact_file).get('visemes', []))}
+        except (OSError, json.JSONDecodeError):
+            pass
+    if not vocal_lip_sync:
+        vocal_lip_sync = RhubarbHealthCheck().check()
+        vocal_lip_sync['status'] = 'available' if vocal_lip_sync['available'] else 'unavailable'
+    return render(request, 'tracks/track_detail.html', {'track': track, 'job': job, 'artifact_rows': artifact_rows, 'experience': experience, 'reviewed_experience': reviewed_experience, 'drum_transcription': drum_transcription, 'vocal_lip_sync': vocal_lip_sync, 'reprocess_form': ReprocessTrackForm(), 'can_delete': can_delete})
 
 
 @require_POST

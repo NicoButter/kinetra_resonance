@@ -30,6 +30,10 @@ models/
 # Generated analysis
 *.log
 
+# Third-party Rhubarb distribution installed locally for development.
+tools/rhubarb/*
+!tools/rhubarb/.gitkeep
+
 # IDE
 .vscode/
 .idea/

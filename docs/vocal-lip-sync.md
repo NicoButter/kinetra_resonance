@@ -1,6 +1,8 @@
 # Vocal lip-sync / Rhubarb
 
-Kinetra invokes Rhubarb only through `VocalLipSyncService` and stores its output as an automatic proposal. The application remains usable when the executable is absent, returns an error, times out, or produces invalid/empty JSON; traditional vocal frames remain available and the job records a warning.
+Kinetra invokes Rhubarb only through `VocalLipSyncService` and stores its output as an automatic proposal. Traditional vocal frames remain available when the executable is absent, returns an error, times out, or produces invalid/empty JSON; with `LIPSYNC_REQUIRED=true` (the default), that failure is also terminal for the ProcessingJob and is shown as the lip-sync stage error.
+
+`RhubarbHealthCheck` verifies the integration before analysis. Resolution is deterministic: a non-empty `RHUBARB_BINARY` takes precedence, followed by the documented project-local `tools/rhubarb/Rhubarb-Lip-Sync-1.14.0-Linux/rhubarb`, then `rhubarb` on `PATH`. Every candidate must be an executable file and must successfully report its version. Its public status contains only the executable basename, availability, version, and executability; an absolute resolved path is available only to development/admin callers that explicitly request it.
 
 The integration was checked against Rhubarb's official repository and CLI documentation: JSON output uses `mouthCues`, `--recognizer` supports `pocketSphinx` and `phonetic`, `--dialogFile` is optional, and `--extendedShapes GHX` enables G/H/X. The executable is invoked with an argument list and `shell=False`; temporary output is isolated per invocation. Configure it with `RHUBARB_BINARY`, `RHUBARB_ENABLED`, `RHUBARB_RECOGNIZER`, `RHUBARB_EXTENDED_SHAPES`, and `RHUBARB_TIMEOUT_SECONDS`. `VOCAL_LANGUAGE=es` selects `phonetic` when recognizer is `auto`; English selects `pocketSphinx`.
 

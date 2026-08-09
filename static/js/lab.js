@@ -65,7 +65,7 @@
   const formatTime = seconds => { const value = Math.max(0, Number(seconds) || 0); const minutes = Math.floor(value / 60); const rest = value - minutes * 60; return `${String(minutes).padStart(2, '0')}:${rest.toFixed(3).padStart(6, '0')}`; };
   const checked = id => Boolean(document.querySelector(id)?.checked);
   const isDrumLaneMode = () => editor && selectedChannel === 'drums';
-  const isVisemeLaneMode = () => editor && selectedChannel === 'vocals' && Array.isArray(data[stage].vocals?.visemes);
+  const isVisemeLaneMode = () => editor && selectedChannel === 'vocals' && (data[stage].vocals?.visemes?.length || 0) > 0;
   const mouthPreview = window.MouthPreview && document.querySelector('#mouth-preview') ? new window.MouthPreview(document.querySelector('#mouth-preview')) : null;
 
   config.audioSources.forEach(source => {
@@ -389,7 +389,7 @@
     if (beforeLabel) beforeLabel.textContent = `−${(windowData.beforeMs / 1000).toFixed(1)} s`;
     if (afterLabel) afterLabel.textContent = `+${(windowData.afterMs / 1000).toFixed(1)} s`;
     if (isDrumLaneMode()) renderDrumLanes(windowData); else if (isVisemeLaneMode()) renderVisemeLanes(windowData); else renderClassic(windowData);
-    if (mouthPreview && isVisemeLaneMode()) { const cue = (indices[stage].vocals || []).find(item => item.startMs <= windowData.nowMs && item.endMs > windowData.nowMs); mouthPreview.setShape(cue?.effectiveShape || cue?.reviewedShape || cue?.automaticShape || cue?.shape || 'X'); mouthPreview.setIntensity(cue?.intensity ?? .5); }
+    if (mouthPreview && isVisemeLaneMode()) { const cue = (indices[stage].vocals || []).find(item => item.startMs <= windowData.nowMs && windowData.nowMs < item.endMs); mouthPreview.setShape(cue?.reviewedShape ?? cue?.automaticShape ?? cue?.effectiveShape ?? cue?.shape ?? 'X'); mouthPreview.setIntensity(cue?.intensity ?? .5); const debug = document.querySelector('#mouth-debug'); if (debug) { debug.hidden = !checked('#mouth-debug-toggle'); debug.textContent = `Current time: ${(windowData.nowMs / 1000).toFixed(3)} s · Current viseme: ${cue?.reviewedShape ?? cue?.automaticShape ?? cue?.effectiveShape ?? cue?.shape ?? 'X'} · Cue: ${cue ? `${(cue.startMs / 1000).toFixed(3)}–${(cue.endMs / 1000).toFixed(3)}` : '—'} · Intensity: ${Number(cue?.intensity ?? 0).toFixed(2)}`; } }
     const current = document.querySelector('#current-time'); const total = document.querySelector('#total-time');
     if (current) current.textContent = formatTime(audio.currentTime);
     if (total) total.textContent = formatTime(audio.duration || (config.durationMs || 0) / 1000);

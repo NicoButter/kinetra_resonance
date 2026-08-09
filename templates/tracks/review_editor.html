@@ -75,7 +75,7 @@
       <small>Drag an empty timeline area left/right to pan. Normal vertical drag assigns a lane. Shift + horizontal drag changes timeMs. Alt + drag selects a group of hits.</small>
     </section>
     <section id="vocal-toolbar" class="panel" hidden><strong>Rapid Vocal Review</strong><span class="muted"> Select a cue, audition it, then confirm or override its mouth shape.</span><div class="button-row"><button id="audition-viseme" class="button secondary" type="button">▶ Play cue</button><button id="confirm-viseme" class="button secondary" type="button">Confirm viseme</button><button id="add-viseme" class="button secondary" type="button">Add mouth cue at playhead</button></div></section>
-    <section id="mouth-preview-panel" class="panel" hidden><h2>VOICE / MOUTH PREVIEW</h2><div id="mouth-preview"></div><label><input id="use-vocal-intensity" type="checkbox" checked> Use vocal intensity</label></section>
+    <section id="mouth-preview-panel" class="panel" hidden><h2>VOICE / MOUTH PREVIEW</h2><div id="mouth-preview"></div><label><input id="use-vocal-intensity" type="checkbox" checked> Use vocal intensity</label><label><input id="mouth-debug-toggle" type="checkbox"> Debug</label><p id="mouth-debug" class="muted" hidden></p></section>
     <section class="panel lab-canvas-wrap"><canvas id="analysis-canvas" aria-label="Human review timeline editor"></canvas><div class="lab-legend"><span id="window-before">−5 s</span><strong>playhead</strong><span id="window-after">+10 s</span></div></section>
     <footer class="review-transport">
       <div class="review-scrubber">

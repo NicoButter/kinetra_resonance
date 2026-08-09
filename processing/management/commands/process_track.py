@@ -6,7 +6,7 @@ from django.utils import timezone
 
 from analysis.models import AnalysisArtifact
 from analysis.postprocessing import MusicalPostProcessor, QualityValidator
-from analysis.lip_sync import VocalLipSyncService
+from analysis.lip_sync import LipSyncError, VocalLipSyncService
 from analysis.services import (
     BassAnalyzer, DrumsAnalyzer, GuitarAnalyzer, IncompleteExperienceError,
     OtherAnalyzer, PianoAnalyzer, TeleoExperienceBuilder, VocalsAnalyzer,
@@ -93,6 +93,7 @@ class Command(BaseCommand):
                 job.save(update_fields=['status', 'current_stage', 'progress'])
                 payload, path = analyzer_class().write(job, stem)
                 if stem_type == Stem.Type.VOCALS:
+                    logger.info('[VOCALS] Starting vocal analysis for job=%s', job.id)
                     current_analyzer = 'VocalLipSyncService'
                     job.current_stage = 'Generating lip sync'
                     job.progress = max(progress, 91)
@@ -107,6 +108,8 @@ class Command(BaseCommand):
                     write_payload(job, 'mouth_cues.json', {'format': 'kinetra-vocal-visemes', 'version': 1, 'analysis': lip_sync.metadata(), 'mouthCues': lip_sync.cues}, folder='raw/vocals')
                     job.metadata = {**job.metadata, 'vocalLipSync': lip_sync.metadata()}
                     job.save(update_fields=['metadata'])
+                    if settings.LIPSYNC_REQUIRED and lip_sync.status != 'success':
+                        raise LipSyncError('Required vocal lip-sync failed: ' + '; '.join(lip_sync.warnings))
                 self.register_artifact(job, stem, artifact_type, path, AnalysisArtifact.Stage.RAW)
                 if stem_type == Stem.Type.DRUMS:
                     track.duration_ms = payload['durationMs']

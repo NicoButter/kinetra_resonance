@@ -15,6 +15,16 @@
   {% if job.status == 'COMPLETED' %}<a class="button" href="{% url 'review-editor' job.id %}">Open Review Editor</a>{% endif %}
 </section>
 {% endif %}
+{% if vocal_lip_sync %}
+<section class="panel">
+  <p class="eyebrow">Vocal Lip Sync</p>
+  <h2>Rhubarb · {{ vocal_lip_sync.status|default:'UNAVAILABLE'|upper }}</h2>
+  <p>Version: {{ vocal_lip_sync.backendVersion|default:vocal_lip_sync.version|default:'—' }} · Recognizer: {{ vocal_lip_sync.recognizer|default:'—' }} · Mouth cues: {{ vocal_lip_sync.cueCount|default:0 }} · Visemes: {{ vocal_lip_sync.visemeCount|default:0 }} · {{ vocal_lip_sync.processingTime|default:0|floatformat:2 }} s</p>
+  {% if vocal_lip_sync.status == 'unavailable' or not vocal_lip_sync.available %}<p class="notice error">Rhubarb Lip Sync is unavailable. Mouth animation cannot be generated.</p>{% endif %}
+  {% for warning in vocal_lip_sync.warnings %}<p class="notice error">{{ warning }}</p>{% endfor %}
+  {% if vocal_lip_sync.reason %}<p class="notice error">{{ vocal_lip_sync.reason }}</p>{% endif %}
+</section>
+{% endif %}
 {% if drum_transcription %}
 <section class="panel">
   <p class="eyebrow">Automatic Drum Transcription</p>
