@@ -80,6 +80,11 @@ class PostProcessingPipelineTests(TestCase):
         raw_before = {artifact.type: artifact.json_file.open('r').read() for artifact in self.job.analysis_artifacts.filter(stage='RAW')}
         MusicalPostProcessor().process(self.job)
         self.assertEqual(self.job.analysis_artifacts.filter(stage='PROCESSED').count(), 6)
+        drums = json.load(self.job.analysis_artifacts.get(stage='PROCESSED', type='DRUMS').json_file.open())
+        self.assertEqual(drums['events'][0]['detectedType'], 'unknown')
+        self.assertIn('detectedConfidence', drums['events'][0])
+        self.assertIsNone(drums['events'][0]['reviewedType'])
+        self.assertNotIn('type', drums['events'][0])
         raw_after = {artifact.type: artifact.json_file.open('r').read() for artifact in self.job.analysis_artifacts.filter(stage='RAW')}
         self.assertEqual(raw_before, raw_after)
 

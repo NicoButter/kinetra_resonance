@@ -12,6 +12,7 @@
   <p class="muted">{{ job.get_profile_display }} · {{ job.separator_model }}</p>
   <p id="error" class="error">{{ job.error_message }}</p>
   <a class="button secondary" href="{% url 'job-lab' job.id %}">Open Analysis Lab</a>
+  {% if job.status == 'COMPLETED' %}<a class="button" href="{% url 'review-editor' job.id %}">Open Review Editor</a>{% endif %}
 </section>
 {% endif %}
 <section>
@@ -24,6 +25,7 @@
 </section>
 <section class="panel teleo-experience">
   <p class="eyebrow">Final product</p><h2>TELEO EXPERIENCE</h2>
+  {% if reviewed_experience %}<div class="card"><strong>Human-reviewed · review v{{ reviewed_experience.version }}</strong><span>{{ reviewed_experience.reviewed_at }}</span><small>{{ reviewed_experience.file_size }} bytes · preferred Teleo source</small><a class="button" href="{{ reviewed_experience.artifact.json_file.url }}" download>Download teleo_experience.reviewed.json</a></div>{% endif %}
   {% if experience %}<div class="cards"><div class="card"><strong>{{ experience.status }} · schema v{{ experience.version }}</strong><span>{{ experience.duration_ms }} ms · {{ experience.total_events }} timeline events</span><small>{{ experience.file_size }} bytes</small></div></div><p><a class="button" href="{{ experience.artifact.json_file.url }}" download>Download teleo_experience.json</a></p>{% else %}<p class="muted">The experience will be available only after all six analyzers complete successfully.</p>{% endif %}
 </section>
 <section class="panel narrow">

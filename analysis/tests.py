@@ -28,8 +28,9 @@ class AnalyzerTests(TestCase):
         payload = DrumsAnalyzer().analyze('drums.wav')
         self.assertEqual(payload['stem'], 'drums')
         self.assertEqual([event['timeMs'] for event in payload['events']], [100, 500])
-        self.assertTrue(all({'durationMs', 'type', 'intensity', 'confidence'} <= set(event) for event in payload['events']))
-        self.assertTrue(all(event['type'] in {'kick', 'snare', 'hi_hat', 'cymbal', 'crash', 'unknown'} for event in payload['events']))
+        self.assertTrue(all({'durationMs', 'detectedType', 'detectedConfidence', 'reviewedType', 'intensity'} <= set(event) for event in payload['events']))
+        self.assertTrue(all(event['detectedType'] in {'kick', 'snare', 'hi_hat', 'cymbal', 'crash', 'unknown'} for event in payload['events']))
+        self.assertTrue(all(event['reviewedType'] is None for event in payload['events']))
         self.assertTrue(all(0 <= event['intensity'] <= 1 for event in payload['events']))
 
     @patch('analysis.services.estimate_pitch', return_value=(82.41, .86))

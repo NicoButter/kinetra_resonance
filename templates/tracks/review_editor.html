@@ -1,0 +1,94 @@
+{% extends 'base.html' %}
+{% load static %}
+{% block title %}Resonance Review Editor · {{ job.track.title }}{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/review.css' %}">{% endblock %}
+{% block content %}
+<section class="section-title">
+  <div>
+    <p class="eyebrow">RESONANCE REVIEW EDITOR</p>
+    <h1>{{ job.track.title }}</h1>
+    <p class="muted">Job {{ job.id }} · Review v{{ review_session.review_version }} · <span id="review-status">{{ review_session.get_status_display }}</span></p>
+  </div>
+  <div><a class="button secondary" href="{% url 'job-lab' job.id %}">Analysis Lab</a> <a class="button secondary" href="{% url 'track-detail' job.track_id %}">Track</a></div>
+</section>
+
+<div class="review-layout">
+  <aside class="panel review-sidebar">
+    <h2>Review controls</h2>
+    <audio id="lab-audio" controls preload="metadata"></audio>
+    <label>Audio source <select id="audio-source"></select></label>
+    <label>Editor channel
+      <select id="review-channel">
+        <option value="drums">Drums · semantic lanes</option><option value="bass">Bass</option><option value="guitar">Guitar</option><option value="piano">Piano</option><option value="vocals">Vocals</option><option value="other">Other</option>
+      </select>
+    </label>
+    <label>Playback speed <select id="playback-speed"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1.0×</option><option value="1.25">1.25×</option></select></label>
+    <fieldset><legend>View mode</legend><label><input type="radio" name="artifact-stage" value="raw"> RAW</label><label><input type="radio" name="artifact-stage" value="processed"> PROCESSED</label><label><input type="radio" name="artifact-stage" value="reviewed" checked> REVIEWED</label></fieldset>
+    <label>Minimum AI confidence <output id="confidence-value">0.00</output><input id="confidence-filter" type="range" min="0" max="1" step="0.05" value="0"></label>
+    <label><input id="low-confidence-only" type="checkbox"> Show low AI confidence only</label>
+    <label>Timeline zoom <select id="timeline-zoom"><option value="5">5 seconds</option><option value="10">10 seconds</option><option value="15" selected>15 seconds</option><option value="20">20 seconds</option><option value="30">30 seconds</option></select></label>
+
+    <details id="drum-filter-panel" open>
+      <summary>Drum filters</summary>
+      <fieldset class="drum-lane-filters"><legend>Show lanes</legend>
+        <label><input type="checkbox" data-drum-lane="unassigned" checked> Unassigned</label>
+        <label><input type="checkbox" data-drum-lane="kick" checked> Kick</label>
+        <label><input type="checkbox" data-drum-lane="snare" checked> Snare</label>
+        <label><input type="checkbox" data-drum-lane="hi_hat" checked> Hi-hat</label>
+        <label><input type="checkbox" data-drum-lane="tom" checked> Tom</label>
+        <label><input type="checkbox" data-drum-lane="crash" checked> Crash</label>
+        <label><input type="checkbox" data-drum-lane="splash" checked> Splash</label>
+        <label><input type="checkbox" data-drum-lane="ride" checked> Ride</label>
+        <label><input type="checkbox" data-drum-lane="cymbal" checked> Cymbal</label>
+        <label><input type="checkbox" data-drum-lane="unknown" checked> Unknown</label>
+      </fieldset>
+      <label><input id="show-ai-suggestions" type="checkbox" checked> Show AI suggestions</label>
+      <label><input id="reviewed-only" type="checkbox"> Show reviewed only</label>
+      <label><input id="unreviewed-only" type="checkbox"> Show unreviewed only</label>
+      <label><input id="show-manual" type="checkbox" checked> Show manually added</label>
+      <label><input id="show-deleted" type="checkbox"> Show deleted events</label>
+    </details>
+
+    <div class="button-row"><button id="previous-unassigned" class="button secondary" type="button">Previous unassigned</button><button id="next-unassigned" class="button secondary" type="button">Next unassigned</button></div>
+    <div class="button-row"><button id="previous-event" class="button secondary" type="button">Previous event</button><button id="next-event" class="button secondary" type="button">Next event</button></div>
+    <div class="button-row"><button id="review-undo" class="button secondary" type="button">Undo</button><button id="review-redo" class="button secondary" type="button">Redo</button></div>
+    <p id="save-status" class="save-saved">Saved</p>
+
+    <details><summary>Audition settings</summary><label>Before (ms)<input id="audition-before" type="number" min="0" max="2000" step="10"></label><label>After (ms)<input id="audition-after" type="number" min="10" max="3000" step="10"></label><label><input id="auto-audition" type="checkbox"> Auto audition selected hit</label></details>
+    <label class="rapid-review-toggle"><input id="rapid-drum-review" type="checkbox"> Rapid Drum Review</label>
+
+    <details><summary>Keyboard shortcuts</summary><dl class="shortcuts">
+      <dt>Space</dt><dd>Play/pause</dd><dt>A</dt><dd>Audition selected hit</dd><dt>K/S/H/T</dt><dd>Kick/Snare/Hi-hat/Tom</dd><dt>C/P/R/Y</dt><dd>Crash/Splash/Ride/Cymbal</dd><dt>U/N</dt><dd>Unassigned/Unknown</dd><dt>[ / ]</dt><dd>Previous/next unassigned</dd><dt>Shift + drag</dt><dd>Move timestamp</dd><dt>Delete</dt><dd>Delete selected</dd><dt>Ctrl+Z / Ctrl+Y</dt><dd>Undo / Redo batch</dd>
+    </dl></details>
+    <h3>Quality status</h3><div id="quality-panel"></div>
+  </aside>
+
+  <div class="review-main">
+    <section class="panel"><p id="lab-counts" class="muted">Loading artifacts…</p><div id="drum-stats"></div></section>
+    <section id="drum-toolbar" class="panel drum-toolbar">
+      <div><strong>Assign selected</strong><span id="selection-count" class="muted">0 selected</span></div>
+      <div class="drum-assign-buttons">
+        <button type="button" data-assign-drum="kick">Kick</button><button type="button" data-assign-drum="snare">Snare</button><button type="button" data-assign-drum="hi_hat">Hi-hat</button><button type="button" data-assign-drum="tom">Tom</button><button type="button" data-assign-drum="crash">Crash</button><button type="button" data-assign-drum="splash">Splash</button><button type="button" data-assign-drum="ride">Ride</button><button type="button" data-assign-drum="cymbal">Cymbal</button><button type="button" data-assign-drum="unknown">Unknown</button><button type="button" data-assign-drum="unassigned">Unassigned</button>
+      </div>
+      <div class="button-row"><button id="audition-hit" class="button secondary" type="button">▶ Audition Hit</button><button id="delete-selected" class="button secondary danger" type="button">Delete selected</button></div>
+      <div class="drum-add"><select id="add-drum-type"><option value="kick">Kick</option><option value="snare">Snare</option><option value="hi_hat">Hi-hat</option><option value="tom">Tom</option><option value="crash">Crash</option><option value="splash">Splash</option><option value="ride">Ride</option><option value="cymbal">Cymbal</option><option value="unknown">Unknown</option></select><button id="add-drum-event" class="button" type="button">Add Drum Event at playhead</button></div>
+      <small>Normal vertical drag assigns a lane. Shift + horizontal drag changes timeMs. Ctrl/⌘+click, Shift+click or marquee select multiple hits.</small>
+    </section>
+    <section class="panel lab-canvas-wrap"><canvas id="analysis-canvas" aria-label="Human review timeline editor"></canvas><div class="lab-legend"><span id="window-before">−5 s</span><strong>playhead</strong><span id="window-after">+10 s</span></div></section>
+    <footer class="review-transport">
+      <div class="review-scrubber">
+        <label for="track-scrubber">Full track navigation</label>
+        <input id="track-scrubber" type="range" min="0" max="1" step="0.01" value="0" aria-label="Seek through the complete track">
+        <div class="scrubber-times"><strong id="current-time">00:00.000</strong><span id="scrubber-preview">00:00.000</span><span id="total-time">00:00.000</span></div>
+      </div>
+    </footer>
+  </div>
+
+  <aside class="panel review-inspector"><h2>Event inspector</h2><div id="event-inspector">Select an event or double-click a track to add one.</div><hr><h3>Continuous ranges</h3><p class="muted">Creates a 1-second review range at the playhead.</p><div class="button-grid"><button type="button" data-range="voice_active">Voice active</button><button type="button" data-range="silence">Silence</button><button type="button" data-range="suspicious">Suspicious</button><button type="button" data-range="unreliable">Other unreliable</button><button type="button" data-range="exclude">Exclude other</button></div></aside>
+</div>
+
+<section class="panel review-finish"><h2>Complete review</h2><p>Materializes reviewed artifacts, validates quality and generates the human-reviewed Teleo Experience. Unassigned drum hits are allowed, but will produce a warning and use their AI prediction as effective fallback.</p><button id="finish-review" class="button" type="button">Finish Human Review</button><pre id="finish-summary"></pre></section>
+{% csrf_token %}
+{{ lab_config|json_script:"lab-config" }}
+<script src="{% static 'js/lab.js' %}"></script>
+{% endblock %}

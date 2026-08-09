@@ -6,7 +6,7 @@ from collections import Counter
 import numpy as np
 from django.conf import settings
 
-from analysis.models import AnalysisArtifact
+from analysis.models import AnalysisArtifact, DrumPieceType
 from analysis.services import IncompleteExperienceError, clamp, write_payload
 
 
@@ -39,6 +39,33 @@ def quality_payload(score, warnings=None, metrics=None, forced_status=None):
     return {'status': status, 'score': score, 'warnings': warnings or [], 'metrics': metrics or {}}
 
 
+def normalize_drum_event_schema(event):
+    """Adapt legacy drum predictions without ever treating them as human review."""
+    legacy_type = event.pop('type', None)
+    legacy_confidence = event.pop('confidence', None)
+    detected_type = event.get('detectedType', legacy_type)
+    if detected_type not in set(DrumPieceType.values) - {DrumPieceType.UNASSIGNED}:
+        detected_type = DrumPieceType.UNKNOWN
+    reviewed_type = event.get('reviewedType')
+    if reviewed_type not in set(DrumPieceType.values) - {DrumPieceType.UNASSIGNED}:
+        reviewed_type = None
+    event['detectedType'] = detected_type
+    event['detectedConfidence'] = event.get('detectedConfidence', legacy_confidence)
+    event['reviewedType'] = reviewed_type
+    event['effectiveType'] = reviewed_type or detected_type
+    return event
+
+
+def assign_stable_event_ids(payload, channel):
+    """Assign deterministic IDs to a processed copy; existing artifacts are adapted on review load."""
+    collection = 'events' if 'events' in payload else 'notes' if 'notes' in payload else 'frames'
+    for index, event in enumerate(payload.get(collection, []), start=1):
+        event.setdefault('id', f'{channel.lower()}-{index:06d}')
+        if str(channel).lower() == 'drums':
+            normalize_drum_event_schema(event)
+    return payload
+
+
 class BasePostProcessor:
     collection = ''
     def process(self, payload):
@@ -58,14 +85,14 @@ class DrumsPostProcessor(BasePostProcessor):
 
     @staticmethod
     def strength(event):
-        return float(event.get('confidence', 0)) + float(event.get('intensity', 0))
+        return float(event.get('detectedConfidence', event.get('confidence', 0)) or 0) + float(event.get('intensity', 0))
 
     def process(self, payload):
         result = copy.deepcopy(payload)
         processed = []
         last_by_type = {}
         for event in sorted(result.get('events', []), key=lambda item: item['timeMs']):
-            event_type = event.get('type', 'unknown')
+            event_type = event.get('detectedType', event.get('type', 'unknown'))
             window = self.refractory_windows.get(event_type)
             previous_index = last_by_type.get(event_type)
             if window is not None and previous_index is not None and event['timeMs'] - processed[previous_index]['timeMs'] < window:
@@ -244,6 +271,7 @@ class MusicalPostProcessor:
             with artifact.json_file.open('r') as artifact_file:
                 raw_payload = json.load(artifact_file)
             processed = processor_class().process(raw_payload)
+            assign_stable_event_ids(processed, artifact_type)
             filename = f'{artifact_type.lower()}.json'
             _, path = write_payload(processing_job, filename, processed, folder='processed')
             relative = path.relative_to(settings.MEDIA_ROOT).as_posix()
@@ -265,7 +293,7 @@ class DrumsQualityValidator(BaseQualityValidator):
     collection = 'events'
     def validate(self, payload):
         events = payload.get('events', [])
-        unknown = sum(event.get('type') == 'unknown' for event in events)
+        unknown = sum(event.get('effectiveType', event.get('detectedType', event.get('type'))) == 'unknown' for event in events)
         ratio = unknown / len(events) if events else 1.0
         score = (1 - ratio) * 0.8 + (0.2 if events else 0)
         warnings = ['High proportion of unclassified drum events.'] if ratio > 0.5 else []

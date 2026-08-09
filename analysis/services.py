@@ -190,7 +190,7 @@ class DrumsAnalyzer(BaseAnalyzer):
             segment = signal[index:min(index + window, len(signal))]
             strengths.append(float(np.sqrt(np.mean(segment * segment))) if len(segment) else 0.0)
             event_type, confidence, features = DrumClassifier().classify(segment)
-            events.append({'timeMs': time_ms, 'durationMs': int(round(len(segment) / SAMPLE_RATE * 1000)), 'type': event_type, 'confidence': confidence, 'features': features})
+            events.append({'timeMs': time_ms, 'durationMs': int(round(len(segment) / SAMPLE_RATE * 1000)), 'detectedType': event_type, 'detectedConfidence': confidence, 'reviewedType': None, 'features': features})
         for event, intensity in zip(events, normalized(strengths)):
             event['intensity'] = clamp(intensity)
         return {'format': 'kinetra-resonance', 'version': ANALYSIS_VERSION, 'stem': self.stem_name, 'durationMs': duration_ms(signal), 'bpm': round(float(bpm), 2), 'confidence': round(float(rhythm_confidence), 3), 'events': sorted(events, key=lambda event: event['timeMs'])}
@@ -307,8 +307,8 @@ class TeleoExperienceBuilder:
         AnalysisArtifact.Type.VOCALS, AnalysisArtifact.Type.OTHER,
     }
 
-    def load_artifacts(self, processing_job):
-        artifacts = processing_job.analysis_artifacts.filter(stage=AnalysisArtifact.Stage.PROCESSED, type__in=self.REQUIRED_TYPES)
+    def load_artifacts(self, processing_job, stage=AnalysisArtifact.Stage.PROCESSED, version=1):
+        artifacts = processing_job.analysis_artifacts.filter(stage=stage, version=version, type__in=self.REQUIRED_TYPES)
         loaded = {}
         for artifact in artifacts:
             with artifact.json_file.open('r') as artifact_file:
@@ -323,15 +323,16 @@ class TeleoExperienceBuilder:
     def build_timeline(loaded):
         timeline = []
         for event in loaded[AnalysisArtifact.Type.DRUMS].get('events', []):
-            timeline.append({'timeMs': int(event['timeMs']), 'channel': 'drums', 'type': event.get('type', 'unknown'), 'intensity': event.get('intensity', 0.0)})
+            event_type = event.get('reviewedType') or event.get('effectiveType') or event.get('detectedType') or event.get('type', 'unknown')
+            timeline.append({'timeMs': int(event['timeMs']), 'channel': 'drums', 'type': event_type, 'intensity': event.get('intensity', 0.0)})
         for artifact_type, channel in ((AnalysisArtifact.Type.BASS, 'bass'), (AnalysisArtifact.Type.GUITAR, 'guitar'), (AnalysisArtifact.Type.PIANO, 'piano')):
             for note in loaded[artifact_type].get('notes', []):
                 payload = {key: note[key] for key in ('midi', 'note', 'endMs') if key in note}
                 timeline.append({'timeMs': int(note['startMs']), 'channel': channel, 'type': note.get('semanticType', 'note'), 'intensity': note.get('intensity', 0.0), 'payload': payload})
         return sorted(timeline, key=lambda event: (event['timeMs'], event['channel']))
 
-    def build(self, processing_job):
-        loaded = self.load_artifacts(processing_job)
+    def build(self, processing_job, artifact_stage=AnalysisArtifact.Stage.PROCESSED, artifact_version=1, review_metadata=None, filename='teleo_experience.json'):
+        loaded = self.load_artifacts(processing_job, artifact_stage, artifact_version)
         track = processing_job.track
         drums = loaded[AnalysisArtifact.Type.DRUMS]
         channels_quality = {artifact_type.lower(): loaded[artifact_type].get('quality', {'status': 'unreliable', 'score': 0.0, 'warnings': ['Missing quality validation.'], 'metrics': {}}) for artifact_type in self.REQUIRED_TYPES}
@@ -341,7 +342,15 @@ class TeleoExperienceBuilder:
             safe[artifact_type] = dict(payload)
             safe[artifact_type][collection] = payload.get(collection, []) if channels_quality[artifact_type.lower()]['status'] != 'unreliable' else []
         timeline = self.build_timeline(safe)
-        drum_events = [{key: event[key] for key in ('timeMs', 'durationMs', 'type', 'intensity', 'confidence') if key in event} for event in safe[AnalysisArtifact.Type.DRUMS].get('events', [])]
+        drum_events = []
+        for event in safe[AnalysisArtifact.Type.DRUMS].get('events', []):
+            event_type = event.get('reviewedType') or event.get('effectiveType') or event.get('detectedType') or event.get('type', 'unknown')
+            compact_event = {key: event[key] for key in ('timeMs', 'durationMs', 'intensity') if key in event}
+            compact_event['type'] = event_type
+            confidence = event.get('detectedConfidence', event.get('confidence'))
+            if confidence is not None and not review_metadata:
+                compact_event['confidence'] = confidence
+            drum_events.append(compact_event)
         payload = {
             'format': 'teleo-music', 'version': 1,
             'analysis': {'engine': 'kinetra-resonance', 'analysisVersion': ANALYSIS_VERSION},
@@ -355,4 +364,8 @@ class TeleoExperienceBuilder:
             'other': {'frames': safe[AnalysisArtifact.Type.OTHER].get('frames', [])},
             'timeline': timeline, 'lyrics': [], 'sections': [], 'haptics': [],
         }
-        return write_payload(processing_job, 'teleo_experience.json', payload, compact=True, folder='')
+        if review_metadata:
+            payload['review'] = review_metadata
+            for channel in ('drums', 'bass', 'guitar', 'piano', 'vocals', 'other'):
+                payload[channel]['analysisSource'] = 'human-reviewed'
+        return write_payload(processing_job, filename, payload, compact=True, folder='')

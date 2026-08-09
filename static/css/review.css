@@ -1,0 +1,135 @@
+[hidden] {
+  display: none !important;
+}
+
+.drum-lane-filters {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 6px;
+  margin: 8px 0;
+}
+
+.review-sidebar .drum-lane-filters label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.drum-toolbar {
+  margin-top: 14px;
+}
+
+.drum-assign-buttons {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(70px, 1fr));
+  gap: 6px;
+  margin: 10px 0;
+}
+
+.drum-assign-buttons button {
+  background: #0d1017;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 7px;
+  cursor: pointer;
+}
+
+.drum-assign-buttons button:hover {
+  border-color: var(--accent);
+}
+
+.drum-add {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 8px;
+}
+
+.drum-counter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(125px, 1fr));
+  gap: 5px 12px;
+  margin-top: 10px;
+  font-size: 13px;
+}
+
+.drum-counter-grid span {
+  padding: 4px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.drum-progress {
+  margin-top: 12px;
+}
+
+.review-warning {
+  color: #ffe28a;
+  margin: 6px 0;
+}
+
+.rapid-review-toggle {
+  margin: 12px 0;
+  padding: 9px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+}
+
+.danger {
+  border-color: #ff7777 !important;
+  color: #ff9d9d !important;
+}
+
+.review-transport {
+  display: block;
+  padding: 12px 16px;
+}
+
+.review-scrubber {
+  width: 100%;
+}
+
+.review-scrubber label {
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.review-scrubber input[type="range"] {
+  width: 100%;
+  padding: 0;
+  cursor: ew-resize;
+  accent-color: var(--accent);
+}
+
+.scrubber-times {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  margin-top: 3px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+
+.scrubber-times strong {
+  color: var(--ink);
+  text-align: left;
+}
+
+.scrubber-times span:nth-child(2) {
+  color: var(--accent);
+  text-align: center;
+}
+
+.scrubber-times span:last-child {
+  text-align: right;
+}
+
+@media (max-width: 800px) {
+  .drum-assign-buttons {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .drum-add {
+    grid-template-columns: 1fr;
+  }
+}

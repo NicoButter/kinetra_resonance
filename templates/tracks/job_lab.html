@@ -1,7 +1,7 @@
 {% extends 'base.html' %}{% load static %}
 {% block title %}Analysis Lab · {{ job.track.title }}{% endblock %}
 {% block content %}
-<section class="section-title"><div><p class="eyebrow">Synchronized Analysis Lab</p><h1>{{ job.track.title }}</h1><p class="muted">{{ job.track.artist|default:'Unknown artist' }} · Job {{ job.id }}</p></div><a class="button secondary" href="{% url 'track-detail' job.track_id %}">Track details</a></section>
+<section class="section-title"><div><p class="eyebrow">Synchronized Analysis Lab</p><h1>{{ job.track.title }}</h1><p class="muted">{{ job.track.artist|default:'Unknown artist' }} · Job {{ job.id }}</p></div><div><a class="button" href="{% url 'review-editor' job.id %}">Review Editor</a> <a class="button secondary" href="{% url 'track-detail' job.track_id %}">Track details</a></div></section>
 <section class="panel lab-controls">
   <audio id="lab-audio" controls preload="metadata"></audio>
   <label>Audio source <select id="audio-source"></select></label>

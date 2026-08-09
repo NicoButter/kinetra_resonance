@@ -36,6 +36,8 @@ El repositorio contiene un MVP Django local funcional con:
 - analizadores RAW separados para drums, bass, guitar, piano, vocals y other;
 - `MusicalPostProcessor` y postprocesadores por canal que generan artifacts PROCESSED sin alterar RAW;
 - `QualityValidator` con estado, score, warnings y metrics por canal;
+- `ReviewSession`/`ReviewAction` y Resonance Review Editor no destructivo;
+- editor multilanes de batería con `ASSIGN_DRUM_PIECE`, batches, audition y Rapid Drum Review;
 - artifacts JSON asociados obligatoriamente al ProcessingJob productor;
 - `TeleoExperienceBuilder` que valida los seis artifacts y genera `teleo_experience.json`;
 - polling de estado en `/api/jobs/<uuid>/status/`;
@@ -63,7 +65,7 @@ No se usa Celery, Redis, PostgreSQL, Docker, DRF ni WebSockets por ahora. SQLite
 media/tracks/<track_uuid>/
 ├── source/original.<ext>
 ├── stems/<tipo>.<ext>
-└── analysis/<job_uuid>/{raw/,processed/,teleo_experience.json}
+└── analysis/<job_uuid>/{raw/,processed/,reviewed/vN/,teleo_experience*.json}
 ```
 
 Los nombres de directorio no dependen del título. La carga restringe extensiones y tamaño; `MAX_UPLOAD_SIZE_MB` vale 250 por defecto.
@@ -92,12 +94,12 @@ El perfil predeterminado es `TELEO_6_STEM`, con `htdemucs_6s.yaml`. `VOCAL_EXTRA
   "bpm": 118.4,
   "confidence": 3.82,
   "events": [
-    {"timeMs": 421, "type": "beat", "intensity": 0.91}
+    {"timeMs": 421, "detectedType": "kick", "detectedConfidence": 0.73, "reviewedType": null, "intensity": 0.91}
   ]
 }
 ```
 
-Los timestamps están en milisegundos e `intensity` siempre pertenece a `[0.0, 1.0]`. Aún no se clasifica kick, snare, hi-hat o cymbal.
+Los timestamps están en milisegundos e `intensity` siempre pertenece a `[0.0, 1.0]`. `detectedType` es una sugerencia automática y nunca se sobrescribe; `reviewedType` contiene exclusivamente la asignación humana. El editor admite kick, snare, hi-hat, tom, crash, splash, ride, cymbal y unknown. Un hit sin revisión permanece visualmente en `UNASSIGNED`.
 
 ## Restricciones para cambios futuros
 
@@ -111,6 +113,6 @@ Los timestamps están en milisegundos e `intensity` siempre pertenece a `[0.0, 1
 
 ## Próximo hito
 
-Mejorar `DrumsAnalyzer` para detectar y clasificar `kick`, `snare`, `hi-hat` y `cymbal`, sin empezar todavía análisis de voz, letras, visemas o API de Teleo.
+Usar el dataset AI-vs-human exportable para evaluar y mejorar `DrumClassifier`, sin entrenar automáticamente ni implementar todavía la representación visual/háptica de Teleo.
 
 El destino arquitectónico es: audio original → seis stems → analizadores por stem → JSON estructurados (`metadata`, instrumentos, timeline, visemas, haptics) → paquete de experiencia Teleo. Los WAV son material intermedio, no el producto final principal.

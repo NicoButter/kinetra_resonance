@@ -10,7 +10,7 @@ python manage.py migrate
 python manage.py runserver
 ```
 
-En desarrollo, Django sirve los archivos de `media/`. No debe considerarse esa configuración de archivos estáticos/media apta para producción.
+En desarrollo, Django sirve los archivos de `media/` mediante `resonance.media.range_media`, con soporte de `Range`/`206 Partial Content` para que HTML Audio pueda hacer seek. No debe considerarse esa configuración apta para producción; el servidor o storage de producción también debe admitir byte ranges.
 
 Configuración opcional, basada en variables de entorno:
 
@@ -21,6 +21,8 @@ Configuración opcional, basada en variables de entorno:
 | `TELEO_SEPARATOR_MODEL` | `htdemucs_6s.yaml` | modelo Teleo de seis stems |
 | `VOCAL_SEPARATOR_MODEL` | `UVR-MDX-NET-Inst_HQ_4.onnx` | modelo vocals/instrumental |
 | `MAX_UPLOAD_SIZE_MB` | `250` | límite de carga |
+| `DRUM_AUDITION_BEFORE_MS` | `150` | audio previo al hit durante audition |
+| `DRUM_AUDITION_AFTER_MS` | `350` | audio posterior al hit durante audition |
 
 Usar `.env.example` como referencia. Este MVP no carga automáticamente `.env`; el shell, el servicio de ejecución o una futura integración de configuración deben exportar las variables.
 
@@ -31,7 +33,9 @@ Usar `.env.example` como referencia. Este MVP no carga automáticamente `.env`; 
 | `tracks.Track` | Audio original, metadatos y espacio de almacenamiento de una canción. |
 | `processing.ProcessingJob` | Perfil, modelo, estado, progreso, etapa y error de un intento de procesamiento. |
 | `tracks.Stem` | Un stem realmente generado y su tipo. Restricción única `(track, type)`. |
-| `analysis.AnalysisArtifact` | Salida versionada `RAW`, `PROCESSED` o `FINAL`, vinculada al job productor. |
+| `analysis.AnalysisArtifact` | Salida versionada `RAW`, `PROCESSED`, `REVIEWED` o `FINAL`, vinculada al job productor. |
+| `analysis.ReviewSession` | Revisión versionada, estado, cursor de Undo/Redo y control optimista de versión. |
+| `analysis.ReviewAction` | Acción humana inmutable con canal, evento, payload auditado, padre, secuencia y `batch_id` opcional. |
 
 Todos los identificadores primarios son UUID. `ProcessingJob.track` es una clave foránea: una canción puede conservar varios jobs. Cada artifact tiene una FK obligatoria a su ProcessingJob para impedir que el builder mezcle ejecuciones. Los stems representan la separación vigente; los JSON históricos se conservan por job.
 
@@ -57,7 +61,9 @@ Teleo requiere exactamente los tipos vocals, drums, bass, guitar, piano y other.
 
 ## Análisis de batería
 
-`analysis.services.DrumsAnalyzer` carga el audio mono con Essentia. `RhythmExtractor2013(method='multifeature')` devuelve BPM y confianza. Los eventos parten de transientes por flujo espectral y su clasificación es conservadora; cuando los descriptores no dominan claramente se usa `unknown`.
+`analysis.services.DrumsAnalyzer` carga el audio mono con Essentia. `RhythmExtractor2013(method='multifeature')` devuelve BPM y confianza. Los eventos parten de transientes por flujo espectral. El clasificador automático produce `detectedType` y `detectedConfidence`; nunca produce una revisión humana. `reviewedType` empieza en `null` y se modifica solamente al reconstruir ReviewActions. Artefactos históricos con `type/confidence` se adaptan en memoria y no se reescriben.
+
+`DrumPieceType` define `unassigned`, `kick`, `snare`, `hi_hat`, `tom`, `crash`, `splash`, `ride`, `cymbal` y `unknown`. `ASSIGN_DRUM_PIECE` cambia la lane semántica sin cambiar el timestamp. `MOVE` cambia el timestamp sin cambiar la lane. No existen sub-stems kick/snare/hi-hat: `drums.wav` permanece intacto.
 
 Todos los analizadores cargan a 44.1 kHz de forma explícita. Bajo, guitarra y piano usan onsets por flujo espectral y pitch por autocorrelación con umbral de confianza. Vocals y other generan frames temporales normalizados. Consultar `ANALYSIS_PIPELINE.md` para algoritmos y limitaciones.
 
@@ -76,6 +82,7 @@ Todos los analizadores cargan a 44.1 kHz de forma explícita. Bajo, guitarra y p
 | `/tracks/<uuid>/` | GET | Estado, stems y resultado |
 | `/lab/` | GET | Laboratorio de batería |
 | `/lab/jobs/<job_uuid>/` | GET | Laboratorio RAW/PROCESSED sincronizado con audio |
+| `/review/jobs/<job_uuid>/` | GET | Resonance Review Editor |
 | `/api/jobs/<uuid>/status/` | GET | Polling de job |
 | `/api/tracks/` | GET | Lista de tracks |
 | `/api/tracks/<uuid>/` | GET | Track individual |
@@ -83,6 +90,10 @@ Todos los analizadores cargan a 44.1 kHz de forma explícita. Bajo, guitarra y p
 | `/api/tracks/<uuid>/analysis/` | GET | Artifacts generados |
 
 Las APIs usan `JsonResponse`; no hay autenticación ni Django REST Framework en el MVP local.
+
+Los endpoints de `/api/reviews/` guardan acciones, reconstruyen REVIEWED, mueven el cursor Undo/Redo, resumen y finalizan. Todas las escrituras requieren la versión actual de la sesión; una versión obsoleta responde `409`.
+
+`POST /api/reviews/<session>/actions/batch/` crea acciones individuales con un `batch_id` común y avanza la versión optimista una vez. El endpoint de datos incluye `drumReview` y `deletedDrums` para contadores/auditoría sin incorporar eliminados al artifact materializado.
 
 ## Seguridad y límites actuales
 

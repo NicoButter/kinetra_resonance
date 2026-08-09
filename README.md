@@ -74,7 +74,9 @@ media/tracks/<track_uuid>/
 └── analysis/<job_uuid>/
     ├── raw/{drums,bass,guitar,piano,vocals,other}.json
     ├── processed/{drums,bass,guitar,piano,vocals,other}.json
-    └── teleo_experience.json
+    ├── reviewed/vN/{drums,bass,guitar,piano,vocals,other}.json
+    ├── teleo_experience.json
+    └── teleo_experience.reviewed.json
 ```
 
 Ejemplo de salida:
@@ -87,7 +89,7 @@ Ejemplo de salida:
   "durationMs": 214000,
   "bpm": 118.4,
   "confidence": 3.82,
-  "events": [{"timeMs": 421, "type": "beat", "intensity": 0.91}]
+  "events": [{"timeMs": 421, "detectedType": "kick", "detectedConfidence": 0.73, "reviewedType": null, "intensity": 0.91}]
 }
 ```
 
@@ -104,6 +106,7 @@ La documentación ampliada está en:
 
 - [Documentación técnica](docs/TECHNICAL.md)
 - [Pipeline de análisis y Teleo Experience](docs/ANALYSIS_PIPELINE.md)
+- [Human Review y Resonance Review Editor](docs/HUMAN_REVIEW.md)
 - [Contexto para ChatGPT](docs/CHATGPT_CONTEXT.md)
 
 ## Alcance actual
@@ -120,6 +123,19 @@ Los WAV son material intermedio. El producto principal actual es `teleo_experien
 ## Analysis Lab
 
 Desde `/lab/` se puede abrir el laboratorio sincronizado de cada job. Utiliza el elemento HTML5 audio como único reloj, Canvas nativo y `requestAnimationFrame`. Permite cambiar entre original/stems, comparar RAW y PROCESSED, filtrar por confianza e inspeccionar eventos y calidad sin modificar los JSON.
+
+## Human Review Workflow
+
+```text
+Automatic Analysis → Post Processing → Human Review
+                   → Reviewed artifacts → Human-reviewed Teleo Experience
+```
+
+El **Resonance Review Editor** está disponible en `/review/jobs/<job_uuid>/`. Cada edición crea un `ReviewAction` auditable y REVIEWED se reconstruye desde PROCESSED más la rama activa de acciones. AI output is never overwritten by human review.
+
+Para DRUMS funciona como un pequeño secuenciador de metadata: todos los golpes empiezan en la lane `UNASSIGNED`, muestran opcionalmente la sugerencia IA y pueden asignarse por drag vertical, shortcuts o batches. Incluye multiselección, audition de 150/350 ms sobre el único `drums.wav`, filtros, contadores y Rapid Drum Review. No genera sub-stems de cuerpos de batería.
+
+Al finalizar se generan `reviewed/v<version>/*.json` y `teleo_experience.reviewed.json`. Teleo deberá preferir esta experiencia cuando exista, aunque la integración API todavía no forma parte de este repositorio.
 
 Kinetra Resonance no descarga música ni elude DRM. Las personas usuarias son responsables de procesar únicamente audio para el que tengan autorización legal.
 

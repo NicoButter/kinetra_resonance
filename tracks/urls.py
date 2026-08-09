@@ -8,4 +8,5 @@ urlpatterns = [
     path('tracks/<uuid:track_id>/reprocess/', views.track_reprocess, name='track-reprocess'),
     path('lab/', views.lab, name='lab'),
     path('lab/jobs/<uuid:job_id>/', views.job_lab, name='job-lab'),
+    path('review/jobs/<uuid:job_id>/', views.review_editor, name='review-editor'),
 ]
