@@ -534,8 +534,16 @@
   }
 
   canvas.addEventListener('pointerdown', event => {
-    if (!isDrumLaneMode() || stage !== 'reviewed') return;
+    if (!editor || stage !== 'reviewed' || event.button !== 0) return;
     const rect = canvas.getBoundingClientRect(); const x = event.clientX - rect.left; const y = event.clientY - rect.top; const hit = findPointerHit(x, y);
+    if (!hit && !event.altKey) {
+      pointerState = {mode: 'pan', x0: x, startTime: audio.currentTime};
+      canvas.classList.add('timeline-panning');
+      canvas.setPointerCapture(event.pointerId);
+      event.preventDefault();
+      return;
+    }
+    if (!isDrumLaneMode()) return;
     pointerState = {x0: x, y0: y, x, y, hit, shift: event.shiftKey, toggle: event.ctrlKey || event.metaKey, moved: false};
     if (!hit && !pointerState.toggle) { selectedIds.clear(); selectedId = null; }
     if (!hit) marquee = {x0: x, y0: y, x1: x, y1: y};
@@ -543,6 +551,14 @@
   });
   canvas.addEventListener('pointermove', event => {
     if (!pointerState) return;
+    if (pointerState.mode === 'pan') {
+      const rect = canvas.getBoundingClientRect(); const x = event.clientX - rect.left;
+      const millisecondsPerPixel = (renderWindow.endMs - renderWindow.startMs) / renderWindow.plotWidth;
+      const duration = audio.duration || Number(config.durationMs || 0) / 1000;
+      audio.currentTime = Math.max(0, Math.min(duration || Infinity, pointerState.startTime - ((x - pointerState.x0) * millisecondsPerPixel) / 1000));
+      event.preventDefault();
+      return;
+    }
     const rect = canvas.getBoundingClientRect(); pointerState.x = event.clientX - rect.left; pointerState.y = event.clientY - rect.top;
     pointerState.moved = pointerState.moved || Math.hypot(pointerState.x - pointerState.x0, pointerState.y - pointerState.y0) > 5;
     if (marquee) { marquee.x1 = pointerState.x; marquee.y1 = pointerState.y; }
@@ -550,6 +566,11 @@
   canvas.addEventListener('pointerup', event => {
     if (!pointerState) return;
     const state = pointerState; pointerState = null;
+    if (state.mode === 'pan') {
+      canvas.classList.remove('timeline-panning');
+      try { canvas.releasePointerCapture(event.pointerId); } catch (_) {}
+      return;
+    }
     if (state.hit) {
       if (state.moved && !state.hit.deleted) {
         if (!selectedIds.has(state.hit.item.id)) selectDrum(state.hit.item);
@@ -569,7 +590,7 @@
     }
     try { canvas.releasePointerCapture(event.pointerId); } catch (_) {}
   });
-  canvas.addEventListener('pointercancel', () => { pointerState = null; marquee = null; });
+  canvas.addEventListener('pointercancel', () => { pointerState = null; marquee = null; canvas.classList.remove('timeline-panning'); });
 
   canvas.addEventListener('click', event => {
     if (isDrumLaneMode()) return;
@@ -627,15 +648,15 @@
 
   document.addEventListener('keydown', event => {
     if (!editor) return;
-    const tag = event.target.tagName;
-    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag) || event.target.isContentEditable) return;
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); cursor('undo'); return; }
-    if ((event.ctrlKey || event.metaKey) && (event.key.toLowerCase() === 'y' || (event.shiftKey && event.key.toLowerCase() === 'z'))) { event.preventDefault(); cursor('redo'); return; }
     if (event.code === 'Space' || event.key === ' ') {
       event.preventDefault();
       if (!event.repeat) togglePlayback();
       return;
     }
+    const tag = event.target.tagName;
+    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag) || event.target.isContentEditable) return;
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); cursor('undo'); return; }
+    if ((event.ctrlKey || event.metaKey) && (event.key.toLowerCase() === 'y' || (event.shiftKey && event.key.toLowerCase() === 'z'))) { event.preventDefault(); cursor('redo'); return; }
     if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); const delta = (event.shiftKey ? 1 : 0.1) * (event.key === 'ArrowLeft' ? -1 : 1); audio.currentTime = Math.max(0, Math.min(audio.duration || Infinity, audio.currentTime + delta)); return; }
     if (event.key === '[') { event.preventDefault(); navigateUnassigned(-1); return; }
     if (event.key === ']') { event.preventDefault(); navigateUnassigned(1); return; }
