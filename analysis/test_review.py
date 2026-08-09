@@ -179,6 +179,16 @@ class ReviewEngineTests(TestCase):
         self.assertEqual(reviewed['vocals']['humanReviewRanges'][0]['mode'], 'voice_active')
         self.assertEqual(reviewed['other']['humanReviewRanges'][0]['mode'], 'exclude')
 
+    def test_vocal_viseme_actions_preserve_automatic_shape_until_reviewed(self):
+        artifact = self.job.analysis_artifacts.get(stage='PROCESSED', type='VOCALS')
+        payload = json.load(artifact.json_file.open())
+        payload['visemes'] = [{'id': 'vocal-mouth-000001', 'startMs': 100, 'endMs': 300, 'automaticShape': 'D', 'reviewedShape': None, 'effectiveShape': 'D', 'reviewStatus': 'UNREVIEWED', 'intensity': .8, 'source': 'rhubarb'}]
+        Path(artifact.json_file.path).write_text(json.dumps(payload), encoding='utf-8')
+        self.act('vocals', 'CHANGE_VISEME', {'eventId': 'vocal-mouth-000001', 'to': 'E'})
+        self.act('vocals', 'MOVE', {'eventId': 'vocal-mouth-000001', 'toStartMs': 120})
+        cue = self.engine.reconstruct(self.session)['vocals']['visemes'][0]
+        self.assertEqual((cue['automaticShape'], cue['reviewedShape'], cue['effectiveShape'], cue['startMs'], cue['endMs']), ('D', 'E', 'E', 120, 320))
+
     def test_undo_redo_and_branch_preserve_audit_trail(self):
         self.act('drums', 'DELETE', {'eventId': 'drums-000001'})
         self.act('drums', 'RELABEL', {'eventId': 'drums-000002', 'to': 'snare'})

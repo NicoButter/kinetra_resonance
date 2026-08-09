@@ -75,10 +75,12 @@ class ReviewSession(models.Model):
 
 
 class ReviewAction(models.Model):
+    class MouthShape(models.TextChoices):
+        A = 'A', 'A'; B = 'B', 'B'; C = 'C', 'C'; D = 'D', 'D'; E = 'E', 'E'; F = 'F', 'F'; G = 'G', 'G'; H = 'H', 'H'; X = 'X', 'X'
     class Channel(models.TextChoices):
         DRUMS = 'drums', 'Drums'; BASS = 'bass', 'Bass'; GUITAR = 'guitar', 'Guitar'; PIANO = 'piano', 'Piano'; VOCALS = 'vocals', 'Vocals'; OTHER = 'other', 'Other'
     class Type(models.TextChoices):
-        DELETE = 'DELETE', 'Delete'; ADD = 'ADD', 'Add'; RELABEL = 'RELABEL', 'Relabel'; ASSIGN_DRUM_PIECE = 'ASSIGN_DRUM_PIECE', 'Assign drum piece'; CONFIRM_DRUM_PIECE = 'CONFIRM_DRUM_PIECE', 'Confirm drum piece'; MOVE = 'MOVE', 'Move'; RESIZE = 'RESIZE', 'Resize'; CHANGE_INTENSITY = 'CHANGE_INTENSITY', 'Change intensity'; CHANGE_PITCH = 'CHANGE_PITCH', 'Change pitch'; MERGE = 'MERGE', 'Merge'; SPLIT = 'SPLIT', 'Split'; CONFIRM = 'CONFIRM', 'Confirm'; MARK_RANGE = 'MARK_RANGE', 'Mark range'
+        DELETE = 'DELETE', 'Delete'; ADD = 'ADD', 'Add'; RELABEL = 'RELABEL', 'Relabel'; ASSIGN_DRUM_PIECE = 'ASSIGN_DRUM_PIECE', 'Assign drum piece'; CONFIRM_DRUM_PIECE = 'CONFIRM_DRUM_PIECE', 'Confirm drum piece'; CONFIRM_VISEME = 'CONFIRM_VISEME', 'Confirm viseme'; CHANGE_VISEME = 'CHANGE_VISEME', 'Change viseme'; MOVE = 'MOVE', 'Move'; RESIZE = 'RESIZE', 'Resize'; CHANGE_INTENSITY = 'CHANGE_INTENSITY', 'Change intensity'; CHANGE_PITCH = 'CHANGE_PITCH', 'Change pitch'; MERGE = 'MERGE', 'Merge'; SPLIT = 'SPLIT', 'Split'; CONFIRM = 'CONFIRM', 'Confirm'; MARK_RANGE = 'MARK_RANGE', 'Mark range'
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     review_session = models.ForeignKey(ReviewSession, related_name='actions', on_delete=models.CASCADE)

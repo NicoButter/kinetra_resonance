@@ -331,6 +331,10 @@ class TeleoExperienceBuilder:
             for note in loaded[artifact_type].get('notes', []):
                 payload = {key: note[key] for key in ('midi', 'note', 'endMs') if key in note}
                 timeline.append({'timeMs': int(note['startMs']), 'channel': channel, 'type': note.get('semanticType', 'note'), 'intensity': note.get('intensity', 0.0), 'payload': payload})
+        for cue in loaded[AnalysisArtifact.Type.VOCALS].get('visemes', []):
+            shape = cue.get('shape') or cue.get('effectiveShape') or cue.get('reviewedShape') or cue.get('automaticShape')
+            if shape:
+                timeline.append({'timeMs': int(cue['startMs']), 'channel': 'vocals', 'type': 'viseme', 'intensity': cue.get('intensity', 0.0), 'payload': {'shape': shape, 'endMs': int(cue['endMs'])}})
         return sorted(timeline, key=lambda event: (event['timeMs'], event['channel']))
 
     def build(self, processing_job, artifact_stage=AnalysisArtifact.Stage.PROCESSED, artifact_version=1, review_metadata=None, filename='teleo_experience.json'):
@@ -343,6 +347,8 @@ class TeleoExperienceBuilder:
             collection = 'events' if artifact_type == AnalysisArtifact.Type.DRUMS else 'frames' if artifact_type in {AnalysisArtifact.Type.VOCALS, AnalysisArtifact.Type.OTHER} else 'notes'
             safe[artifact_type] = dict(payload)
             safe[artifact_type][collection] = payload.get(collection, []) if channels_quality[artifact_type.lower()]['status'] != 'unreliable' else []
+            if artifact_type == AnalysisArtifact.Type.VOCALS:
+                safe[artifact_type]['visemes'] = payload.get('visemes', []) if channels_quality[artifact_type.lower()]['status'] != 'unreliable' else []
         timeline = self.build_timeline(safe)
         drum_events = []
         drum_piece_events = {
@@ -375,7 +381,7 @@ class TeleoExperienceBuilder:
             'bass': {'notes': safe[AnalysisArtifact.Type.BASS].get('notes', [])},
             'guitar': {'notes': safe[AnalysisArtifact.Type.GUITAR].get('notes', [])},
             'piano': {'notes': safe[AnalysisArtifact.Type.PIANO].get('notes', [])},
-            'vocals': {'frames': safe[AnalysisArtifact.Type.VOCALS].get('frames', []), 'visemes': []},
+            'vocals': {'frames': safe[AnalysisArtifact.Type.VOCALS].get('frames', []), 'visemes': [{key: cue[key] for key in ('startMs', 'endMs', 'intensity', 'pitchNormalized') if key in cue} | {'shape': cue.get('shape') or cue.get('effectiveShape') or cue.get('reviewedShape') or cue.get('automaticShape')} for cue in safe[AnalysisArtifact.Type.VOCALS].get('visemes', [])]},
             'other': {'frames': safe[AnalysisArtifact.Type.OTHER].get('frames', [])},
             'timeline': timeline, 'lyrics': [], 'sections': [], 'haptics': [],
         }

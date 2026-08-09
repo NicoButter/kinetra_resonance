@@ -20,6 +20,7 @@ CHANNEL_TO_TYPE = {artifact_type.lower(): artifact_type for artifact_type in CHA
 DRUM_TYPES = set(DrumPieceType.values)
 ASSIGNED_DRUM_TYPES = DRUM_TYPES - {DrumPieceType.UNASSIGNED}
 NOTE_CHANNELS = {'bass', 'guitar', 'piano'}
+MOUTH_SHAPES = set(ReviewAction.MouthShape.values)
 
 
 class ReviewValidationError(ValueError):
@@ -27,7 +28,25 @@ class ReviewValidationError(ValueError):
 
 
 def collection_name(channel):
-    return 'events' if channel == 'drums' else 'notes' if channel in NOTE_CHANNELS else 'frames'
+    return 'events' if channel == 'drums' else 'notes' if channel in NOTE_CHANNELS else 'visemes' if channel == 'vocals' else 'frames'
+
+
+def viseme_shape(event):
+    return event.get('reviewedShape') or event.get('effectiveShape') or event.get('automaticShape')
+
+
+def viseme_review_status(event):
+    if event.get('source') == 'human': return 'MANUAL'
+    if event.get('reviewMetadata', {}).get('confirmedAutomaticByHuman'): return 'CONFIRMED'
+    if event.get('reviewedShape'): return 'CONFIRMED' if event['reviewedShape'] == event.get('automaticShape') else 'OVERRIDDEN'
+    return 'UNREVIEWED'
+
+
+def set_viseme_shape(event, shape, confirmed=False):
+    event['reviewedShape'] = shape
+    event['effectiveShape'] = shape or event.get('automaticShape')
+    if confirmed: event.setdefault('reviewMetadata', {})['confirmedAutomaticByHuman'] = True
+    event['reviewStatus'] = viseme_review_status(event)
 
 
 def midi_fields(midi):
@@ -105,7 +124,7 @@ class ReviewEngine:
 
     @staticmethod
     def find_event(payloads, channel, event_id):
-        collection = payloads[channel][collection_name(channel)]
+        collection = payloads[channel].get(collection_name(channel), [])
         for index, event in enumerate(collection):
             if event.get('id') == event_id:
                 return collection, index, event
@@ -132,8 +151,12 @@ class ReviewEngine:
             set_drum_piece(event, payload['to'])
             event.setdefault('reviewMetadata', {})['confirmedAutomaticByHuman'] = True
             event['reviewStatus'] = drum_review_status(event)
+        elif action.action_type == ReviewAction.Type.CHANGE_VISEME:
+            set_viseme_shape(event, payload['to'])
+        elif action.action_type == ReviewAction.Type.CONFIRM_VISEME:
+            set_viseme_shape(event, payload['to'], confirmed=True)
         elif action.action_type == ReviewAction.Type.MOVE:
-            if channel == 'drums' or channel in {'vocals', 'other'}:
+            if channel == 'drums' or channel == 'other':
                 event['timeMs'] = payload['toMs']
             else:
                 event['startMs'], event['endMs'] = payload['toStartMs'], payload['toEndMs']
@@ -226,6 +249,13 @@ class ReviewEngine:
                 event['endMs'] = self.validate_time(event.get('endMs'), duration, 'endMs')
                 if event['endMs'] <= event['startMs']: raise ReviewValidationError('Note end must be after start.')
                 event.update(midi_fields(event.get('midi')))
+            elif channel == 'vocals':
+                event['startMs'] = self.validate_time(event.get('startMs'), duration, 'startMs')
+                event['endMs'] = self.validate_time(event.get('endMs'), duration, 'endMs')
+                if event['endMs'] <= event['startMs']: raise ReviewValidationError('Viseme end must be after start.')
+                shape = str(event.get('shape', event.get('reviewedShape', ''))).upper()
+                if shape not in MOUTH_SHAPES: raise ReviewValidationError('Invalid mouth shape.')
+                event.update({'automaticShape': None, 'reviewedShape': shape, 'effectiveShape': shape, 'reviewStatus': 'MANUAL'})
             else:
                 raise ReviewValidationError('Use range review for continuous channels.')
             event['intensity'] = self.validate_intensity(event.get('intensity', .5))
@@ -267,6 +297,12 @@ class ReviewEngine:
                 'automatic': automatic_snapshot(event),
                 'kinetraOnset': bool(event.get('kinetraOnset')),
             }
+        if action_type in {ReviewAction.Type.CHANGE_VISEME, ReviewAction.Type.CONFIRM_VISEME}:
+            if channel != 'vocals': raise ReviewValidationError('This action is only available for vocal visemes.')
+            target = event.get('automaticShape') if action_type == ReviewAction.Type.CONFIRM_VISEME else str(incoming.get('to', '')).upper()
+            if target not in MOUTH_SHAPES: raise ReviewValidationError('Invalid mouth shape.')
+            if action_type == ReviewAction.Type.CONFIRM_VISEME and event.get('source') == 'human': raise ReviewValidationError('Manual visemes cannot be confirmed as automatic.')
+            return event_id, {'action': action_type, 'from': viseme_shape(event), 'to': target, 'automaticShape': event.get('automaticShape')}
         if action_type == ReviewAction.Type.RELABEL:
             if channel != 'drums' or incoming.get('to') not in ASSIGNED_DRUM_TYPES: raise ReviewValidationError('Invalid drum relabel.')
             return event_id, {
@@ -286,8 +322,13 @@ class ReviewEngine:
                 length = event['endMs'] - event['startMs']
                 if target + length > duration: raise ReviewValidationError('Moved note exceeds track duration.')
                 return event_id, {'action': action_type, 'fromStartMs': event['startMs'], 'fromEndMs': event['endMs'], 'toStartMs': target, 'toEndMs': target + length}
+            if channel == 'vocals':
+                target = self.validate_time(incoming.get('toStartMs'), duration, 'toStartMs')
+                length = event['endMs'] - event['startMs']
+                if target + length > duration: raise ReviewValidationError('Moved viseme exceeds track duration.')
+                return event_id, {'action': action_type, 'fromStartMs': event['startMs'], 'fromEndMs': event['endMs'], 'toStartMs': target, 'toEndMs': target + length}
         if action_type == ReviewAction.Type.RESIZE:
-            if channel not in NOTE_CHANNELS: raise ReviewValidationError('Only notes can be resized.')
+            if channel not in NOTE_CHANNELS | {'vocals'}: raise ReviewValidationError('Only notes and visemes can be resized.')
             target = self.validate_time(incoming.get('toEndMs'), duration, 'toEndMs')
             if target <= event['startMs']: raise ReviewValidationError('Note end must be after start.')
             return event_id, {'action': action_type, 'fromEndMs': event['endMs'], 'toEndMs': target}
@@ -313,7 +354,7 @@ class ReviewEngine:
             merged.update({'id': f'manual-{channel}-{uuid.uuid4()}', 'startMs': min(item['startMs'] for item in events), 'endMs': max(item['endMs'] for item in events), 'intensity': max(item.get('intensity', 0) for item in events), 'confidence': min(item.get('confidence', 1) for item in events), 'source': 'human'})
             return event_id, {'action': action_type, 'eventIds': event_ids, 'originals': copy.deepcopy(events), 'mergedEvent': merged}
         if action_type == ReviewAction.Type.SPLIT:
-            if channel not in NOTE_CHANNELS: raise ReviewValidationError('Only notes can be split.')
+            if channel not in NOTE_CHANNELS | {'vocals'}: raise ReviewValidationError('Only notes and visemes can be split.')
             split = self.validate_time(incoming.get('splitMs'), duration, 'splitMs')
             if not event['startMs'] < split < event['endMs']: raise ReviewValidationError('Split must be inside the note.')
             first, second = copy.deepcopy(event), copy.deepcopy(event)
@@ -498,6 +539,22 @@ class ReviewEngine:
         result['reviewMetadata'] = {'status': 'human-reviewed', 'reviewSessionId': str(session.id), 'reviewVersion': session.review_version}
         return result
 
+    def materialize_vocals(self, session, payload):
+        result = {key: copy.deepcopy(value) for key, value in payload.items() if key not in {'visemes', 'quality', 'reviewMetadata'}}
+        visemes = []
+        for cue in payload.get('visemes', []):
+            shape = viseme_shape(cue)
+            if shape not in MOUTH_SHAPES:
+                continue
+            visemes.append({key: cue[key] for key in ('id', 'startMs', 'endMs', 'intensity', 'peakIntensity', 'pitchHz', 'pitchNormalized', 'spectralBrightness') if key in cue} | {
+                'shape': shape,
+                'source': 'human-added' if cue.get('source') == 'human' else 'human-reviewed',
+            })
+        result['visemes'] = sorted(visemes, key=lambda cue: (cue['startMs'], cue['endMs']))
+        result['quality'] = QualityValidator.VALIDATORS[AnalysisArtifact.Type.VOCALS]().validate(result)
+        result['reviewMetadata'] = {'status': 'human-reviewed', 'reviewSessionId': str(session.id), 'reviewVersion': session.review_version}
+        return result
+
     @transaction.atomic
     def finish(self, session):
         if session.status == ReviewSession.Status.COMPLETED:
@@ -509,6 +566,8 @@ class ReviewEngine:
             artifact_type = CHANNEL_TO_TYPE[channel]
             if channel == ReviewAction.Channel.DRUMS:
                 payload = self.materialize_drums(session, payload, drum_summary)
+            elif channel == ReviewAction.Channel.VOCALS:
+                payload = self.materialize_vocals(session, payload)
             else:
                 payload['quality'] = QualityValidator.VALIDATORS[artifact_type]().validate(payload)
                 payload['reviewMetadata'] = {'status': 'human-reviewed', 'reviewSessionId': str(session.id), 'reviewVersion': session.review_version}
@@ -519,6 +578,12 @@ class ReviewEngine:
                     folder=f'reviewed/v{session.review_version}/drums',
                     review_status='human-reviewed', pieces=REVIEWED_DRUM_PIECES,
                 )
+            elif channel == ReviewAction.Channel.VOCALS:
+                write_payload(session.processing_job, 'visemes.json', {
+                    'format': 'kinetra-vocal-visemes', 'version': 1,
+                    'review': {'status': 'human-reviewed', 'reviewSessionId': str(session.id), 'reviewVersion': session.review_version, 'reviewedAt': timezone.now().isoformat()},
+                    'visemes': payload.get('visemes', []),
+                }, folder=f'reviewed/v{session.review_version}/vocals')
             artifacts[artifact_type] = AnalysisArtifact.objects.update_or_create(
                 processing_job=session.processing_job, type=artifact_type, stage=AnalysisArtifact.Stage.REVIEWED, version=session.review_version,
                 defaults={'track': session.processing_job.track, 'stem': None, 'json_file': path.relative_to(settings.MEDIA_ROOT).as_posix()},

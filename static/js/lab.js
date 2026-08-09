@@ -45,7 +45,7 @@
   let auditionState = null;
   let scrubbing = false;
 
-  const collectionFor = payload => payload?.events || payload?.notes || payload?.frames || [];
+  const collectionFor = payload => payload?.events || payload?.notes || payload?.visemes || payload?.frames || [];
   const eventTime = item => item.timeMs ?? item.startMs ?? 0;
   const automaticDrumType = item => item.automaticType || item.automatic?.type || item.detectedType || (item.source === 'human' ? null : item.type) || 'unassigned';
   const aiConfidence = item => item.automatic?.confidence ?? item.detectedConfidence ?? item.confidence ?? item.pitchConfidence ?? null;
@@ -65,6 +65,8 @@
   const formatTime = seconds => { const value = Math.max(0, Number(seconds) || 0); const minutes = Math.floor(value / 60); const rest = value - minutes * 60; return `${String(minutes).padStart(2, '0')}:${rest.toFixed(3).padStart(6, '0')}`; };
   const checked = id => Boolean(document.querySelector(id)?.checked);
   const isDrumLaneMode = () => editor && selectedChannel === 'drums';
+  const isVisemeLaneMode = () => editor && selectedChannel === 'vocals' && Array.isArray(data[stage].vocals?.visemes);
+  const mouthPreview = window.MouthPreview && document.querySelector('#mouth-preview') ? new window.MouthPreview(document.querySelector('#mouth-preview')) : null;
 
   config.audioSources.forEach(source => {
     const option = new Option(source.label, source.url);
@@ -185,7 +187,9 @@
       const pieceRows = drumPieces.filter(piece => piece !== 'unassigned').map(piece => `<span><strong>${drumLabels[piece]}</strong> ${summary.counts[piece]}</span>`).join('');
       const transcription = data.processed.drums?.transcription || data.raw.drums?.transcription;
       const automaticSummary = transcription ? `<div class="transcription-summary"><strong>Automatic Drum Transcription</strong><span>Backend: ${escapeHtml(String(transcription.backend || 'none').toUpperCase())}</span><span>Device: ${escapeHtml(String(transcription.device || '—').toUpperCase())}</span><span>Duration: ${Number(transcription.processingTime || 0).toFixed(2)} s</span><span>Events: ${Number(transcription.automaticEventCount ?? transcription.eventCount ?? 0)}</span><span>Fallback: ${transcription.fallbackUsed ? 'yes' : 'no'}</span>${Object.entries(transcription.classCounts || {}).map(([piece, count]) => `<span>${escapeHtml(drumLabels[piece] || piece)}: ${Number(count)}</span>`).join('')}${(transcription.warnings || []).map(warning => `<small class="review-warning">${escapeHtml(warning)}</small>`).join('')}</div>` : '';
-      drumStatsPanel.innerHTML = `${automaticSummary}<div class="drum-progress"><strong>Drums review progress: ${(summary.progress * 100).toFixed(1)}%</strong><div class="progress"><i style="width:${summary.progress * 100}%"></i></div>${summary.unassigned ? `<p class="review-warning">${summary.unassigned} drum events remain unassigned.</p>` : ''}</div><div class="drum-counter-grid"><span>Detected hits: <strong>${summary.totalDetected}</strong></span><span>Reviewed: <strong>${summary.reviewed}</strong></span><span>Unassigned: <strong>${summary.unassigned}</strong></span><span>Deleted: <strong>${summary.deleted}</strong></span><span>Manual added: <strong>${summary.manualAdded}</strong></span>${pieceRows}</div>`;
+      const lip = data.processed.vocals?.lipSync || data.raw.vocals?.lipSync; const visemes = indices.reviewed.vocals?.length ? indices.reviewed.vocals : (indices.processed.vocals || []);
+      const vocalSummary = lip ? `<div class="transcription-summary"><strong>Vocal lip sync</strong><span>Backend: ${escapeHtml(lip.backend || 'none')}</span><span>Mouth cues: ${visemes.length}</span><span>Status: ${escapeHtml(lip.status || 'unknown')}</span>${(lip.warnings || []).map(warning => `<small class="review-warning">${escapeHtml(warning)}</small>`).join('')}</div>` : '';
+      drumStatsPanel.innerHTML = `${automaticSummary}${vocalSummary}<div class="drum-progress"><strong>Drums review progress: ${(summary.progress * 100).toFixed(1)}%</strong><div class="progress"><i style="width:${summary.progress * 100}%"></i></div>${summary.unassigned ? `<p class="review-warning">${summary.unassigned} drum events remain unassigned.</p>` : ''}</div><div class="drum-counter-grid"><span>Detected hits: <strong>${summary.totalDetected}</strong></span><span>Reviewed: <strong>${summary.reviewed}</strong></span><span>Unassigned: <strong>${summary.unassigned}</strong></span><span>Deleted: <strong>${summary.deleted}</strong></span><span>Manual added: <strong>${summary.manualAdded}</strong></span>${pieceRows}</div>`;
     }
     const selectionCount = document.querySelector('#selection-count');
     if (selectionCount) selectionCount.textContent = `${selectedIds.size} selected`;
@@ -201,6 +205,8 @@
     if (drumToolbar) drumToolbar.hidden = !isDrumLaneMode();
     const filters = document.querySelector('#drum-filter-panel');
     if (filters) filters.hidden = !isDrumLaneMode();
+    const vocalToolbar = document.querySelector('#vocal-toolbar'); if (vocalToolbar) vocalToolbar.hidden = !isVisemeLaneMode();
+    const preview = document.querySelector('#mouth-preview-panel'); if (preview) preview.hidden = !isVisemeLaneMode();
   }
 
   async function loadReviewed() {
@@ -367,12 +373,23 @@
     drawCache.filter(entry => entry.item.id === selectedId).forEach(entry => { context.strokeStyle = '#fff'; context.strokeRect(entry.x0 - 3, entry.y0, Math.max(8, entry.x1 - entry.x0 + 6), entry.y1 - entry.y0); });
   }
 
+  function renderVisemeLanes(windowData) {
+    const shapes = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'X']; const laneHeight = 42;
+    const {width, height} = resizeCanvas(shapes.length * laneHeight + 18); const plotLeft = 54; const plotWidth = width - plotLeft - 16;
+    const xFor = time => plotLeft + ((time - windowData.startMs) / (windowData.endMs - windowData.startMs)) * plotWidth;
+    renderWindow = {...windowData, plotLeft, plotWidth, laneHeight, xFor}; context.clearRect(0, 0, width, height); drawCache = [];
+    shapes.forEach((shape, row) => { const top = 8 + row * laneHeight; context.fillStyle = '#eff2f8'; context.fillText(shape, 18, top + 25); context.strokeStyle = '#2a3140'; context.beginPath(); context.moveTo(plotLeft, top + laneHeight); context.lineTo(width, top + laneHeight); context.stroke(); });
+    visibleItems('vocals', windowData.startMs, windowData.endMs).forEach(cue => { const shape = cue.effectiveShape || cue.reviewedShape || cue.automaticShape || cue.shape; const row = shapes.indexOf(shape); if (row < 0) return; const x0 = xFor(cue.startMs), x1 = Math.max(x0 + 3, xFor(cue.endMs)), top = 8 + row * laneHeight + 7; context.fillStyle = cue.reviewedShape || cue.source === 'human' ? '#79f5ce' : '#f5b879'; context.fillRect(x0, top, x1 - x0, laneHeight - 14); context.fillStyle = '#17202e'; context.fillText(cue.reviewStatus === 'UNREVIEWED' ? 'AI' : shape, x0 + 3, top + 18); drawCache.push({item: cue, channel: 'vocals', x0, x1, y0: top, y1: top + laneHeight - 14}); });
+    const playhead = xFor(windowData.nowMs); context.strokeStyle = '#fff'; context.beginPath(); context.moveTo(playhead, 0); context.lineTo(playhead, height); context.stroke();
+  }
+
   function render() {
     const windowData = timeWindow();
     const beforeLabel = document.querySelector('#window-before'); const afterLabel = document.querySelector('#window-after');
     if (beforeLabel) beforeLabel.textContent = `−${(windowData.beforeMs / 1000).toFixed(1)} s`;
     if (afterLabel) afterLabel.textContent = `+${(windowData.afterMs / 1000).toFixed(1)} s`;
-    if (isDrumLaneMode()) renderDrumLanes(windowData); else renderClassic(windowData);
+    if (isDrumLaneMode()) renderDrumLanes(windowData); else if (isVisemeLaneMode()) renderVisemeLanes(windowData); else renderClassic(windowData);
+    if (mouthPreview && isVisemeLaneMode()) { const cue = (indices[stage].vocals || []).find(item => item.startMs <= windowData.nowMs && item.endMs > windowData.nowMs); mouthPreview.setShape(cue?.effectiveShape || cue?.reviewedShape || cue?.automaticShape || cue?.shape || 'X'); mouthPreview.setIntensity(cue?.intensity ?? .5); }
     const current = document.querySelector('#current-time'); const total = document.querySelector('#total-time');
     if (current) current.textContent = formatTime(audio.currentTime);
     if (total) total.textContent = formatTime(audio.duration || (config.durationMs || 0) / 1000);
@@ -409,6 +426,12 @@
       [-50, -10, 10, 50].forEach(delta => actions.append(button(`${delta > 0 ? '+' : ''}${delta} ms`, () => saveAction('MOVE', {eventId: item.id, toMs: Math.round(item.timeMs + delta)}, 'drums'))));
     } else {
       actions.append(button('Delete', () => saveAction('DELETE', {eventId: item.id})), button('Confirm correct', () => saveAction('CONFIRM', {eventId: item.id})));
+      if (selectedChannel === 'vocals' && item.startMs != null) {
+        actions.replaceChildren(); actions.append(button('▶ Play cue', auditionViseme));
+        if (item.source !== 'human' && item.automaticShape) actions.append(button('Confirm viseme', () => saveAction('CONFIRM_VISEME', {eventId: item.id})));
+        const shape = document.createElement('select'); ['A','B','C','D','E','F','G','H','X'].forEach(value => shape.add(new Option(value, value))); shape.value = item.effectiveShape || item.reviewedShape || item.automaticShape || 'X'; actions.append(shape, button('Change shape', () => saveAction('CHANGE_VISEME', {eventId: item.id, to: shape.value})), button('Delete', () => saveAction('DELETE', {eventId: item.id})));
+        const end = document.createElement('input'); end.type = 'number'; end.value = item.endMs; actions.append(end, button('Resize', () => saveAction('RESIZE', {eventId: item.id, toEndMs: Number(end.value)})), button('Split at playhead', () => saveAction('SPLIT', {eventId: item.id, splitMs: Math.round(audio.currentTime * 1000)})));
+      }
     }
     if (noteChannels.includes(selectedChannel)) {
       [-50, -10, 10, 50].forEach(delta => actions.append(button(`${delta > 0 ? '+' : ''}${delta} ms`, () => saveAction('MOVE', {eventId: item.id, toStartMs: Math.round(item.startMs + delta)}))));
@@ -556,6 +579,13 @@
     try { await audio.play(); } catch (error) { await restoreAfterAudition(state); setSaveStatus(`Audition failed: ${error.message}`, 'error'); }
   }
 
+  async function auditionViseme() {
+    const item = selectedEvent(); if (!item || selectedChannel !== 'vocals') return;
+    const vocalsSource = config.audioSources.find(source => source.key === 'vocals'); if (!vocalsSource) { setSaveStatus('The vocals.wav source is unavailable.', 'error'); return; }
+    audio.pause(); if (sourceSelect.value !== vocalsSource.url) { sourceSelect.value = vocalsSource.url; audio.src = vocalsSource.url; await waitForMetadata(); }
+    audio.currentTime = Math.max(0, item.startMs - 100) / 1000; const end = (item.endMs + 100) / 1000; const listener = () => { if (audio.currentTime >= end) { audio.pause(); audio.removeEventListener('timeupdate', listener); } }; audio.addEventListener('timeupdate', listener); await audio.play();
+  }
+
   function selectDrum(item, options = {}) {
     if (!item?.id) return;
     if (options.toggle) {
@@ -647,6 +677,7 @@
 
   canvas.addEventListener('click', event => {
     if (isDrumLaneMode()) return;
+    if (isVisemeLaneMode()) { const rect = canvas.getBoundingClientRect(); const hit = findPointerHit(event.clientX - rect.left, event.clientY - rect.top); if (hit) { selectedId = hit.item.id; selectedObject = hit.item; renderInspector(); } return; }
     const rect = canvas.getBoundingClientRect(); const x = event.clientX - rect.left; const y = event.clientY - rect.top; const row = Math.floor((y - 15) / 86);
     if (row < 0 || row >= channels.length) return;
     const previousChannel = selectedChannel; const previousId = selectedId; selectedChannel = channels[row]; if (channelSelect) channelSelect.value = selectedChannel;
@@ -667,6 +698,10 @@
   document.querySelector('#confirm-ai-suggestion')?.addEventListener('click', confirmAutomaticSelected);
   document.querySelector('#audition-hit')?.addEventListener('click', auditionSelected);
   document.querySelector('#add-drum-event')?.addEventListener('click', () => addDrum(document.querySelector('#add-drum-type').value));
+  document.querySelector('#audition-viseme')?.addEventListener('click', auditionViseme);
+  document.querySelector('#confirm-viseme')?.addEventListener('click', () => { const item = selectedEvent(); if (item) saveAction('CONFIRM_VISEME', {eventId: item.id}, 'vocals'); });
+  document.querySelector('#add-viseme')?.addEventListener('click', () => saveAction('ADD', {event: {startMs: Math.round(audio.currentTime * 1000), endMs: Math.min(config.durationMs, Math.round(audio.currentTime * 1000 + 150)), shape: 'X', intensity: .5}}, 'vocals'));
+  document.querySelector('#use-vocal-intensity')?.addEventListener('change', event => mouthPreview?.setUseIntensity(event.target.checked));
   document.querySelector('#review-undo')?.addEventListener('click', () => cursor('undo'));
   document.querySelector('#review-redo')?.addEventListener('click', () => cursor('redo'));
   document.querySelector('#previous-unreviewed')?.addEventListener('click', () => navigateUnreviewed(-1));

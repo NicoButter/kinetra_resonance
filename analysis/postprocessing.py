@@ -7,6 +7,7 @@ import numpy as np
 from django.conf import settings
 
 from analysis.models import AnalysisArtifact, DrumPieceType
+from analysis.lip_sync import VocalCueEnrichmentService, VocalLipSyncQualityValidator
 from analysis.services import IncompleteExperienceError, clamp, write_payload
 
 
@@ -127,6 +128,9 @@ def assign_stable_event_ids(payload, channel):
         event.setdefault('id', f'{channel.lower()}-{index:06d}')
         if str(channel).lower() == 'drums':
             normalize_drum_event_schema(event)
+    if str(channel).lower() == 'vocals':
+        for index, cue in enumerate(payload.get('visemes', []), start=1):
+            cue.setdefault('id', f'vocal-mouth-{index:06d}')
     return payload
 
 
@@ -308,6 +312,10 @@ class VocalsPostProcessor(FramePostProcessor):
             if float(frame.get('pitchConfidence', 0)) < 0.45:
                 frame['pitchHz'] = None
                 frame['pitchNormalized'] = 0.0
+        cues = VocalCueEnrichmentService().enrich(result.get('mouthCues', result.get('visemes', [])), result['frames'])
+        result['visemes'] = cues
+        result['lipSync'] = copy.deepcopy(payload.get('lipSync', {'backend': 'none', 'status': 'unavailable', 'cueCount': 0, 'warnings': ['Lip-sync analysis unavailable.']}))
+        result['visemeQuality'] = VocalLipSyncQualityValidator().validate(cues, result.get('durationMs', 0), result['lipSync'].get('status', 'available'))
         return result
 
 
@@ -354,6 +362,13 @@ class MusicalPostProcessor:
                     processing_job, processed['events'], folder='processed/drums',
                     review_status='automatic', pieces=AUTOMATIC_DRUM_PIECES,
                 )
+            elif artifact_type == AnalysisArtifact.Type.VOCALS:
+                write_payload(processing_job, 'frames.json', {'format': 'kinetra-vocal-frames', 'version': 1, 'frames': processed.get('frames', [])}, folder='processed/vocals')
+                write_payload(processing_job, 'visemes.json', {
+                    'format': 'kinetra-vocal-visemes', 'version': 1,
+                    'analysis': processed.get('lipSync', {}), 'quality': processed.get('visemeQuality', {}),
+                    'visemes': processed.get('visemes', []),
+                }, folder='processed/vocals')
         return generated
 
 

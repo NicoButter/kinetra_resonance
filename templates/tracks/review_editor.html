@@ -74,6 +74,8 @@
       <div class="drum-add"><select id="add-drum-type"><option value="kick">Kick</option><option value="snare">Snare</option><option value="hi_hat">Hi-hat</option><option value="tom">Tom</option><option value="crash">Crash</option><option value="splash">Splash</option><option value="ride">Ride</option><option value="cymbal">Cymbal</option><option value="unknown">Unknown</option></select><button id="add-drum-event" class="button" type="button">Add Drum Event at playhead</button></div>
       <small>Drag an empty timeline area left/right to pan. Normal vertical drag assigns a lane. Shift + horizontal drag changes timeMs. Alt + drag selects a group of hits.</small>
     </section>
+    <section id="vocal-toolbar" class="panel" hidden><strong>Rapid Vocal Review</strong><span class="muted"> Select a cue, audition it, then confirm or override its mouth shape.</span><div class="button-row"><button id="audition-viseme" class="button secondary" type="button">▶ Play cue</button><button id="confirm-viseme" class="button secondary" type="button">Confirm viseme</button><button id="add-viseme" class="button secondary" type="button">Add mouth cue at playhead</button></div></section>
+    <section id="mouth-preview-panel" class="panel" hidden><h2>VOICE / MOUTH PREVIEW</h2><div id="mouth-preview"></div><label><input id="use-vocal-intensity" type="checkbox" checked> Use vocal intensity</label></section>
     <section class="panel lab-canvas-wrap"><canvas id="analysis-canvas" aria-label="Human review timeline editor"></canvas><div class="lab-legend"><span id="window-before">−5 s</span><strong>playhead</strong><span id="window-after">+10 s</span></div></section>
     <footer class="review-transport">
       <div class="review-scrubber">
@@ -90,5 +92,5 @@
 <section class="panel review-finish"><h2>Complete review</h2><p>Materializes reviewed artifacts, validates quality and generates the human-reviewed Teleo Experience. Pending hits are allowed with a warning; an AI family is used only when that event actually has one.</p><button id="finish-review" class="button" type="button">Finish Human Review</button><pre id="finish-summary"></pre></section>
 {% csrf_token %}
 {{ lab_config|json_script:"lab-config" }}
-<script src="{% static 'js/lab.js' %}"></script>
+<script src="{% static 'js/mouth-preview.js' %}"></script><script src="{% static 'js/lab.js' %}"></script>
 {% endblock %}

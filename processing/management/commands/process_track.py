@@ -6,6 +6,7 @@ from django.utils import timezone
 
 from analysis.models import AnalysisArtifact
 from analysis.postprocessing import MusicalPostProcessor, QualityValidator
+from analysis.lip_sync import VocalLipSyncService
 from analysis.services import (
     BassAnalyzer, DrumsAnalyzer, GuitarAnalyzer, IncompleteExperienceError,
     OtherAnalyzer, PianoAnalyzer, TeleoExperienceBuilder, VocalsAnalyzer,
@@ -91,6 +92,21 @@ class Command(BaseCommand):
                 job.progress = progress
                 job.save(update_fields=['status', 'current_stage', 'progress'])
                 payload, path = analyzer_class().write(job, stem)
+                if stem_type == Stem.Type.VOCALS:
+                    current_analyzer = 'VocalLipSyncService'
+                    job.current_stage = 'Generating lip sync'
+                    job.progress = max(progress, 91)
+                    job.save(update_fields=['current_stage', 'progress'])
+                    lip_sync = VocalLipSyncService().analyze(stem.file.path, duration_ms=payload.get('durationMs'), language=getattr(track, 'language', None))
+                    payload['lipSync'] = lip_sync.metadata()
+                    payload['mouthCues'] = lip_sync.cues
+                    # Analyzer write APIs are deliberately simple; overwrite its job-owned raw manifest.
+                    from analysis.services import write_payload
+                    _, path = write_payload(job, 'vocals.json', payload, folder='raw')
+                    write_payload(job, 'frames.json', {'format': 'kinetra-vocal-frames', 'version': 1, 'frames': payload.get('frames', [])}, folder='raw/vocals')
+                    write_payload(job, 'mouth_cues.json', {'format': 'kinetra-vocal-visemes', 'version': 1, 'analysis': lip_sync.metadata(), 'mouthCues': lip_sync.cues}, folder='raw/vocals')
+                    job.metadata = {**job.metadata, 'vocalLipSync': lip_sync.metadata()}
+                    job.save(update_fields=['metadata'])
                 self.register_artifact(job, stem, artifact_type, path, AnalysisArtifact.Stage.RAW)
                 if stem_type == Stem.Type.DRUMS:
                     track.duration_ms = payload['durationMs']
