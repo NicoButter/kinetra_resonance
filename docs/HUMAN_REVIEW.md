@@ -19,6 +19,7 @@ Eventos nuevos usan IDs `manual-<channel>-<uuid>`. Los postprocesos nuevos asign
 
 - `DELETE`, `ADD`, `RELABEL`, `ASSIGN_DRUM_PIECE`, `MOVE`, `RESIZE`.
 - `CHANGE_INTENSITY`, `CHANGE_PITCH`, `MERGE`, `SPLIT`.
+- `CHANGE_VISEME` reemplaza únicamente `reviewedShape`; `CONFIRM_VISEME` confirma la propuesta automática sin reescribir `automaticShape`.
 - `CONFIRM` guarda `reviewMetadata.confirmedByHuman` para canales generales.
 - `CONFIRM_DRUM_PIECE` confirma explícitamente una sugerencia automática y guarda `confirmedAutomaticByHuman`.
 - `MARK_RANGE` registra voz activa/silencio/sospechoso o rangos other unreliable/exclude/energy multiplier.
@@ -46,6 +47,32 @@ Cada detección conserva dos verdades separadas:
 
 Los tipos admitidos son `UNASSIGNED`, `KICK`, `SNARE`, `HI_HAT`, `TOM`, `CRASH`, `SPLASH`, `RIDE`, `CYMBAL` y `UNKNOWN`.
 
+## Auditoría de visemas vocales
+
+Rhubarb produce la propuesta semántica `automaticShape` (`A`, `B`, `C`, `D`, `E`, `F`, `G`, `H`, `X`) y VocalsAnalyzer aporta intensidad, pitch y presence. No se inventan formas desde los frames: la decisión humana se guarda separadamente como `reviewedShape`.
+
+```json
+{
+  "id": "vocal-mouth-000193",
+  "startMs": 84230,
+  "endMs": 84390,
+  "automaticShape": "D",
+  "reviewedShape": "C",
+  "effectiveShape": "C",
+  "source": "rhubarb"
+}
+```
+
+En el canal **VOCALS** de la etapa REVIEWED:
+
+- Un arrastre vertical de una cue la mueve al carril de boca A–H/X seleccionado y crea `CHANGE_VISEME`.
+- `Shift` + arrastre horizontal desplaza `startMs` y `endMs` sin cambiar su duración (`MOVE`).
+- `Delete` o **Delete selected cue** crea `DELETE`; no borra el artifact PROCESSED ni el cue de Rhubarb.
+- El inspector permite escuchar la cue, confirmar la propuesta, elegir una forma, redimensionar, dividir o eliminarla.
+- Las acciones se actualizan de inmediato en el Mouth Preview y son reversibles con Undo/Redo.
+
+El renderer muestra letra, forma de boca, procedencia AI/Human, intensidad y visema anterior/siguiente. Es una ayuda de auditoría de Kinetra Resonance; no es el renderer final de Teleo.
+
 ## Editor
 
 Ruta: `/review/jobs/<job_uuid>/`.
@@ -67,6 +94,8 @@ La barra **Full track navigation** permite recorrer la canción completa con pas
 | C/P/R/Y | Asignar Crash/Splash/Ride/Cymbal |
 | U/N | Asignar Unassigned/Unknown |
 | `[` / `]` | Unassigned anterior/siguiente |
+| Arrastre vertical en VOCALS | Cambiar al carril de visema A–H/X |
+| Shift + arrastre horizontal en VOCALS | Mover la cue en el tiempo |
 | Delete | Eliminar selección o batch |
 | Ctrl/Cmd+Z | Undo |
 | Ctrl/Cmd+Y | Redo |

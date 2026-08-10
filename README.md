@@ -166,7 +166,20 @@ Al finalizar se generan `reviewed/v<version>/*.json` y `teleo_experience.reviewe
 
 El canal VOCALS del Review Editor representa los visemas de Rhubarb mediante `MouthRenderer` y su implementación local `SvgAnimeMouthRenderer`. La cadena es `Rhubarb visemes → MouthRenderer → SVG morphing`; usa `audio.currentTime` como único reloj y Anime.js 4.5.0 únicamente para suavizar transiciones entre poses A–H/X. El bundle y su licencia MIT están versionados en `static/vendor/animejs/`, por lo que no hace falta npm ni Internet al clonar el proyecto. Es una herramienta de auditoría de Kinetra Resonance, no el renderer final de Teleo.
 
+La revisión vocal no altera los resultados automáticos de Rhubarb: crea `ReviewAction` sobre el artifact REVIEWED del Job seleccionado. En VOCALS, arrastrar una cue verticalmente la mueve al carril de visema A–H/X correcto (override humano); `Shift` + arrastre horizontal corrige su tiempo conservando duración; `Delete` elimina una detección errónea. También se puede confirmar, redimensionar, dividir o agregar cues. Undo/Redo reconstruye el resultado de forma no destructiva.
+
 Kinetra Resonance no descarga música ni elude DRM. Las personas usuarias son responsables de procesar únicamente audio para el que tengan autorización legal.
+
+## Autoría
+
+<p align="center">
+  <img src="static/images/vetrabyte-logo.webp" alt="Vetrabyte Software Development" width="480">
+</p>
+
+Kinetra Resonance fue desarrollado por **Vetrabyte**.
+
+- Autor: Nicolás Butterfield
+- Contacto: [nicobutter@gmail.com](mailto:nicobutter@gmail.com)
 
 ## Licencia
 
