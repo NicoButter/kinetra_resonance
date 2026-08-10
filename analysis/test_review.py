@@ -188,6 +188,8 @@ class ReviewEngineTests(TestCase):
         self.act('vocals', 'MOVE', {'eventId': 'vocal-mouth-000001', 'toStartMs': 120})
         cue = self.engine.reconstruct(self.session)['vocals']['visemes'][0]
         self.assertEqual((cue['automaticShape'], cue['reviewedShape'], cue['effectiveShape'], cue['startMs'], cue['endMs']), ('D', 'E', 'E', 120, 320))
+        self.act('vocals', 'DELETE', {'eventId': 'vocal-mouth-000001'})
+        self.assertEqual(self.engine.reconstruct(self.session)['vocals']['visemes'], [])
 
     def test_undo_redo_and_branch_preserve_audit_trail(self):
         self.act('drums', 'DELETE', {'eventId': 'drums-000001'})

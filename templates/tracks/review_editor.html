@@ -58,7 +58,7 @@
     <label class="rapid-review-toggle"><input id="rapid-drum-review" type="checkbox"> Rapid Drum Review</label>
 
     <details><summary>Keyboard shortcuts</summary><dl class="shortcuts">
-      <dt>Space</dt><dd>Play/pause</dd><dt>A</dt><dd>Audition selected hit</dd><dt>Enter</dt><dd>Confirm selected AI suggestion</dd><dt>K/S/H/T</dt><dd>Kick/Snare/Hi-hat/Tom</dd><dt>C/P/R/Y</dt><dd>Crash/Splash/Ride/Cymbal</dd><dt>U/N</dt><dd>Unassigned/Unknown</dd><dt>[ / ]</dt><dd>Previous/next unreviewed</dd><dt>Shift + drag</dt><dd>Move timestamp</dd><dt>Delete</dt><dd>Delete selected</dd><dt>Ctrl+Z / Ctrl+Y</dt><dd>Undo / Redo batch</dd>
+      <dt>Space</dt><dd>Play/pause</dd><dt>A</dt><dd>Audition selected hit</dd><dt>Enter</dt><dd>Confirm selected AI suggestion</dd><dt>K/S/H/T</dt><dd>Kick/Snare/Hi-hat/Tom</dd><dt>C/P/R/Y</dt><dd>Crash/Splash/Ride/Cymbal</dd><dt>U/N</dt><dd>Unassigned/Unknown</dd><dt>[ / ]</dt><dd>Previous/next unreviewed</dd><dt>Vocal drag</dt><dd>Move cue to a mouth-shape lane</dd><dt>Shift + drag</dt><dd>Move timestamp</dd><dt>Delete</dt><dd>Delete selected</dd><dt>Ctrl+Z / Ctrl+Y</dt><dd>Undo / Redo batch</dd>
     </dl></details>
     <h3>Quality status</h3><div id="quality-panel"></div>
   </aside>
@@ -74,7 +74,7 @@
       <div class="drum-add"><select id="add-drum-type"><option value="kick">Kick</option><option value="snare">Snare</option><option value="hi_hat">Hi-hat</option><option value="tom">Tom</option><option value="crash">Crash</option><option value="splash">Splash</option><option value="ride">Ride</option><option value="cymbal">Cymbal</option><option value="unknown">Unknown</option></select><button id="add-drum-event" class="button" type="button">Add Drum Event at playhead</button></div>
       <small>Drag an empty timeline area left/right to pan. Normal vertical drag assigns a lane. Shift + horizontal drag changes timeMs. Alt + drag selects a group of hits.</small>
     </section>
-    <section id="vocal-toolbar" class="panel" hidden><strong>Rapid Vocal Review</strong><span class="muted"> Select a cue, audition it, then confirm or override its mouth shape.</span><div class="button-row"><button id="audition-viseme" class="button secondary" type="button">▶ Play cue</button><button id="confirm-viseme" class="button secondary" type="button">Confirm viseme</button><button id="add-viseme" class="button secondary" type="button">Add mouth cue at playhead</button></div></section>
+    <section id="vocal-toolbar" class="panel" hidden><strong>Vocal cue audit</strong><span class="muted"> Drag a cue vertically to its correct mouth shape. Shift + drag horizontally moves its timing.</span><div class="button-row"><button id="audition-viseme" class="button secondary" type="button">▶ Play cue</button><button id="confirm-viseme" class="button secondary" type="button">Confirm viseme</button><button id="delete-viseme" class="button secondary danger" type="button">Delete selected cue</button><button id="add-viseme" class="button secondary" type="button">Add mouth cue at playhead</button></div></section>
     <section id="mouth-preview-panel" class="panel mouth-preview-panel" hidden>
       <div class="mouth-preview-heading"><div><p class="eyebrow">VOCALS</p><h2>MOUTH PREVIEW</h2></div><span id="mouth-renderer-status" class="muted">SVG</span></div>
       <div id="mouth-preview" class="mouth-preview-stage"></div>

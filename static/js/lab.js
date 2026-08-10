@@ -21,6 +21,7 @@
   const scrubberPreview = document.querySelector('#scrubber-preview');
   const channels = ['drums', 'bass', 'guitar', 'piano', 'vocals', 'other'];
   const noteChannels = ['bass', 'guitar', 'piano'];
+  const visemeShapes = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'X'];
   const drumPieces = ['unassigned', 'kick', 'snare', 'hi_hat', 'tom', 'crash', 'splash', 'ride', 'cymbal', 'unknown'];
   const drumLabels = {unassigned: 'UNASSIGNED', kick: 'KICK', snare: 'SNARE', hi_hat: 'HI-HAT', tom: 'TOM', crash: 'CRASH', splash: 'SPLASH', ride: 'RIDE', cymbal: 'CYMBAL', unknown: 'UNKNOWN'};
   const data = {raw: {}, processed: {}, reviewed: {}};
@@ -425,7 +426,7 @@
   }
 
   function renderVisemeLanes(windowData) {
-    const shapes = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'X']; const laneHeight = 42;
+    const shapes = visemeShapes; const laneHeight = 42;
     const {width, height} = resizeCanvas(shapes.length * laneHeight + 18); const plotLeft = 104; const plotWidth = width - plotLeft - 16;
     const xFor = time => plotLeft + ((time - windowData.startMs) / (windowData.endMs - windowData.startMs)) * plotWidth;
     renderWindow = {...windowData, plotLeft, plotWidth, laneHeight, xFor}; context.clearRect(0, 0, width, height); drawCache = [];
@@ -594,6 +595,13 @@
     if (saved) { clearSelection(); if (checked('#rapid-drum-review')) navigateUnreviewed(1, audio.currentTime * 1000, true); }
   }
 
+  async function deleteSelectedViseme() {
+    const item = selectedEvent();
+    if (!item || selectedChannel !== 'vocals' || stage !== 'reviewed') return;
+    const saved = await saveAction('DELETE', {eventId: item.id}, 'vocals');
+    if (saved) clearSelection();
+  }
+
   function addDrum(piece, timeMs = Math.round(audio.currentTime * 1000)) {
     selectedChannel = 'drums'; if (channelSelect) channelSelect.value = 'drums';
     stage = 'reviewed'; document.querySelector('input[value="reviewed"]')?.click(); updateEditorMode();
@@ -677,6 +685,13 @@
       event.preventDefault();
       return;
     }
+    if (isVisemeLaneMode()) {
+      if (!hit) return;
+      pointerState = {mode: 'viseme', x0: x, y0: y, x, y, hit, shift: event.shiftKey, moved: false};
+      canvas.setPointerCapture(event.pointerId);
+      event.preventDefault();
+      return;
+    }
     if (!isDrumLaneMode()) return;
     pointerState = {x0: x, y0: y, x, y, hit, shift: event.shiftKey, toggle: event.ctrlKey || event.metaKey, moved: false};
     if (!hit && !pointerState.toggle) { selectedIds.clear(); selectedId = null; }
@@ -702,6 +717,21 @@
     const state = pointerState; pointerState = null;
     if (state.mode === 'pan') {
       canvas.classList.remove('timeline-panning');
+      try { canvas.releasePointerCapture(event.pointerId); } catch (_) {}
+      return;
+    }
+    if (state.mode === 'viseme') {
+      if (state.hit && state.moved) {
+        const cue = state.hit.item;
+        if (state.shift) {
+          const deltaMs = ((state.x - state.x0) / renderWindow.plotWidth) * (renderWindow.endMs - renderWindow.startMs);
+          saveAction('MOVE', {eventId: cue.id, toStartMs: Math.round(cue.startMs + deltaMs)}, 'vocals');
+        } else {
+          const row = Math.max(0, Math.min(visemeShapes.length - 1, Math.floor((state.y - 8) / renderWindow.laneHeight)));
+          const targetShape = visemeShapes[row];
+          if (targetShape !== mouthHelpers.effectiveShape(cue)) saveAction('CHANGE_VISEME', {eventId: cue.id, to: targetShape}, 'vocals');
+        }
+      } else if (state.hit) { selectedId = state.hit.item.id; selectedObject = state.hit.item; renderInspector(); }
       try { canvas.releasePointerCapture(event.pointerId); } catch (_) {}
       return;
     }
@@ -751,6 +781,7 @@
   document.querySelector('#add-drum-event')?.addEventListener('click', () => addDrum(document.querySelector('#add-drum-type').value));
   document.querySelector('#audition-viseme')?.addEventListener('click', auditionViseme);
   document.querySelector('#confirm-viseme')?.addEventListener('click', () => { const item = selectedEvent(); if (item) saveAction('CONFIRM_VISEME', {eventId: item.id}, 'vocals'); });
+  document.querySelector('#delete-viseme')?.addEventListener('click', deleteSelectedViseme);
   document.querySelector('#add-viseme')?.addEventListener('click', () => saveAction('ADD', {event: {startMs: Math.round(audio.currentTime * 1000), endMs: Math.min(config.durationMs, Math.round(audio.currentTime * 1000 + 150)), shape: 'X', intensity: .5}}, 'vocals'));
   document.querySelector('#use-vocal-intensity')?.addEventListener('change', () => { lastMouthIntensity = null; });
   document.querySelector('#mouth-debug-toggle')?.addEventListener('change', event => { const controls = document.querySelector('#mouth-shape-controls'); if (controls) controls.hidden = !event.target.checked; if (!event.target.checked) developerShape = null; });
@@ -803,6 +834,7 @@
     if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); const delta = (event.shiftKey ? 1 : 0.1) * (event.key === 'ArrowLeft' ? -1 : 1); audio.currentTime = Math.max(0, Math.min(audio.duration || Infinity, audio.currentTime + delta)); return; }
     if (event.key === '[') { event.preventDefault(); navigateUnreviewed(-1); return; }
     if (event.key === ']') { event.preventDefault(); navigateUnreviewed(1); return; }
+    if (event.key === 'Delete' && selectedChannel === 'vocals' && selectedId) { event.preventDefault(); deleteSelectedViseme(); return; }
     if (event.key.toLowerCase() === 'a' && selectedIds.size) { event.preventDefault(); auditionSelected(); return; }
     if (event.key === 'Delete' && selectedIds.size) { event.preventDefault(); deleteSelected(); return; }
     if (!selectedIds.size || selectedChannel !== 'drums') return;
