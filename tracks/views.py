@@ -216,6 +216,7 @@ def review_editor(request, job_id):
         'audioSources': audio_sources, 'artifacts': artifact_urls,
         'windowBeforeMs': 5000, 'windowAfterMs': 10000,
         'mouthTransitionMs': settings.MOUTH_PREVIEW_TRANSITION_MS,
+        'mouthCoarticulationMs': settings.MOUTH_COARTICULATION_MS,
         'lipSyncInputSource': (job.metadata or {}).get('vocalLipSync', {}).get('inputSource', 'standard_vocals'),
         'seekSnapThresholdMs': 250,
         'review': {

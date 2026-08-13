@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kinetra articulation visual check</title>
+  <link rel="stylesheet" href="../static/css/app.css">
+  <link rel="stylesheet" href="../static/css/review.css">
+  <style>
+    body { padding: 24px; background: #0b0e14; color: #eff2f8; }
+    h1, .instructions { max-width: 1100px; margin-inline: auto; }
+    .visual-grid { max-width: 1100px; margin: 24px auto; display: grid; grid-template-columns: repeat(2, minmax(300px, 1fr)); gap: 18px; }
+    .visual-card { padding: 14px; border: 1px solid #343b4b; border-radius: 10px; background: #151a24; }
+    .visual-card h2 { margin: 0; }
+    .visual-card .mouth-preview-stage { min-height: 250px; }
+    @media (max-width: 720px) { .visual-grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <h1>Muted articulation distinction check</h1>
+  <p class="instructions">The four poses must be recognizable through geometry: closure/pressure, pucker, teeth-to-lip contact, and raised tongue.</p>
+  <main class="visual-grid"></main>
+  <p id="transition-check" class="instructions">Transition stress check: pending</p>
+  <script src="../static/vendor/animejs/anime.umd.min.js"></script>
+  <script src="../static/js/mouth-pose.js"></script>
+  <script src="../static/js/mouth-shapes.js"></script>
+  <script src="../static/js/mouth-renderer.js"></script>
+  <script src="../static/js/svg-anime-mouth-renderer.js"></script>
+  <script>
+    const checks = [['A', 'MBP · closed pressure'], ['F', 'UW · round pucker'], ['G', 'FV · upper teeth / lower lip'], ['H', 'L · raised tongue']];
+    const grid = document.querySelector('.visual-grid');
+    checks.forEach(([shape, label]) => {
+      const card = document.createElement('section');
+      card.className = 'visual-card';
+      card.innerHTML = `<h2>Rhubarb ${shape} · ${label}</h2><div class="mouth-preview-stage"></div>`;
+      grid.append(card);
+      const renderer = new SvgAnimeMouthRenderer(card.querySelector('.mouth-preview-stage'));
+      renderer.setPose(KinetraMouthShapes.entry(shape).pose, {immediate: true});
+    });
+    const stressHost = document.createElement('div');
+    const stressRenderer = new SvgAnimeMouthRenderer(stressHost, {transitionMs: 70});
+    const sequence = ['A', 'G', 'C', 'F', 'H', 'X'];
+    stressRenderer.setPose(KinetraMouthShapes.entry('X').pose, {immediate: true});
+    sequence.forEach(shape => stressRenderer.setPose(KinetraMouthShapes.entry(shape).pose));
+    const pathsValid = [...stressHost.querySelectorAll('path[d]')].every(path => !path.getAttribute('d').includes('NaN'));
+    const passed = pathsValid && stressRenderer.activeAnimations.length <= 7;
+    document.querySelector('#transition-check').textContent = `Transition stress check: ${passed ? 'PASSED' : 'FAILED'} · active animations ${stressRenderer.activeAnimations.length}`;
+    document.body.dataset.transitionCheck = passed ? 'passed' : 'failed';
+  </script>
+</body>
+</html>

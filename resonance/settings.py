@@ -133,8 +133,11 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
 STATICFILES_DIRS = [BASE_DIR / 'static']
+# Deployment/collectstatic destination. Keep source assets in ``static/`` and
+# collected assets in the separate, Git-ignored ``staticfiles/`` directory.
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 TELEO_SEPARATOR_MODEL = os.environ.get('TELEO_SEPARATOR_MODEL', 'htdemucs_6s.yaml')
@@ -188,6 +191,7 @@ RHUBARB_TIMEOUT_SECONDS = int(os.environ.get('RHUBARB_TIMEOUT_SECONDS', '120'))
 LIPSYNC_REQUIRED = os.environ.get('LIPSYNC_REQUIRED', 'true').lower() in {'1', 'true', 'yes'}
 VOCAL_LANGUAGE = os.environ.get('VOCAL_LANGUAGE', 'es')
 MOUTH_PREVIEW_TRANSITION_MS = int(os.environ.get('MOUTH_PREVIEW_TRANSITION_MS', '70'))
+MOUTH_COARTICULATION_MS = max(0, min(160, int(os.environ.get('MOUTH_COARTICULATION_MS', '60'))))
 VOCAL_AUDITION_BEFORE_MS = int(os.environ.get('VOCAL_AUDITION_BEFORE_MS', '100'))
 VOCAL_AUDITION_AFTER_MS = int(os.environ.get('VOCAL_AUDITION_AFTER_MS', '100'))
 

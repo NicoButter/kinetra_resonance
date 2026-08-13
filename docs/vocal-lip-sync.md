@@ -30,6 +30,8 @@ Artifacts retain the compatible `vocals.json` manifest and add `raw/vocals/{fram
 
 The Kinetra Resonance Review Editor displays processed/reviewed visemes with a local SVG mouth rig. `MouthRenderer` is the UI-facing abstraction and `SvgAnimeMouthRenderer` is the current implementation. It uses the vendored Anime.js 4.5.0 bundle (`static/vendor/animejs/`) to morph SVG layers, with no runtime network dependency and no frontend build step.
 
+The rig now receives normalized anatomical `MouthPose` values from `ArticulationMapper`; it does not interpret Rhubarb codes itself. See [Vocal articulation preview](VOCAL_ARTICULATION.md) for the canonical A–X mapping, coarticulation, expression bounds, and developer Articulation Lab.
+
 `audio.currentTime` remains the only musical clock. On every animation frame the editor resolves `startMs <= currentTimeMs < endMs` and uses `reviewedShape ?? automaticShape`; Anime.js only smooths a changed visual pose. A seek jump greater than 250 ms snaps directly to the current pose, pauses retain it, and ending playback resets to `X`. Interrupted morphs are cancelled rather than queued. Intensity, pitch and presence add restrained expression but never select a mouth shape.
 
 The renderer is an audit tool, not Teleo artwork. The reviewer can drag a cue vertically to override its shape, Shift-drag horizontally to correct timing, and delete false detections. Those changes become non-destructive REVIEWED actions; Rhubarb's automatic proposal remains intact.

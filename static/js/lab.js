@@ -67,28 +67,18 @@
   const checked = id => Boolean(document.querySelector(id)?.checked);
   const isDrumLaneMode = () => editor && selectedChannel === 'drums';
   const isVisemeLaneMode = () => editor && selectedChannel === 'vocals' && (data[stage].vocals?.visemes?.length || 0) > 0;
+  const articulationMapper = globalThis.KinetraArticulation ? new globalThis.KinetraArticulation.ArticulationMapper() : null;
+  const articulationTable = globalThis.KinetraMouthShapes?.ARTICULATIONS || {};
+  const coarticulation = globalThis.KinetraMouthCoarticulation;
+  const mouthPoseApi = globalThis.KinetraMouthPose;
   const mouthPreview = window.SvgAnimeMouthRenderer && document.querySelector('#mouth-preview') ? new window.SvgAnimeMouthRenderer(document.querySelector('#mouth-preview'), {transitionMs: config.mouthTransitionMs || 70}) : null;
   const mouthHelpers = window.MouthPreviewHelpers;
   let previousMouthTimeMs = null;
-  let lastMouthIntensity = null;
-  let lastMouthPitch = null;
-  let lastMouthPresence = null;
   let developerShape = null;
-  const visemeOpenness = {A: 3, B: 12, C: 24, D: 42, E: 28, F: 11, G: 15, H: 20, X: 5};
-
-  function drawVisemeReference(shape, x, y) {
-    const opening = visemeOpenness[shape] || visemeOpenness.X;
-    const rounded = shape === 'E' || shape === 'F';
-    context.save();
-    context.fillStyle = '#241c2a'; context.strokeStyle = '#f5b879'; context.lineWidth = 2;
-    context.beginPath();
-    context.moveTo(x, y); context.quadraticCurveTo(x + 17, y - opening / 3, x + 34, y);
-    context.quadraticCurveTo(x + 17, y + opening / 3, x, y); context.closePath(); context.fill(); context.stroke();
-    if (['B', 'G'].includes(shape)) { context.fillStyle = '#fff5dc'; context.fillRect(x + 9, y - 3, 16, 3); }
-    if (shape === 'H') { context.fillStyle = '#ff8fc8'; context.beginPath(); context.ellipse(x + 17, y + 4, 8, 2.5, 0, 0, Math.PI * 2); context.fill(); }
-    if (rounded) { context.strokeStyle = '#f5b879'; context.beginPath(); context.arc(x + 17, y, 11, 0, Math.PI * 2); context.stroke(); }
-    context.restore();
-  }
+  let developerPose = null;
+  let currentRenderedPose = null;
+  let currentRenderedShape = 'X';
+  const articulationLabel = shape => `${shape} · ${articulationTable[shape]?.alias || 'REST'}`;
 
   config.audioSources.forEach(source => {
     const option = new Option(source.label, source.url);
@@ -232,33 +222,46 @@
   }
 
   function updateMouthPreview(nowMs) {
-    if (!mouthPreview || !isVisemeLaneMode()) return;
+    if (!mouthPreview || !articulationMapper || !isVisemeLaneMode()) return;
     const cues = indices[stage].vocals || [];
-    const cue = mouthHelpers.activeViseme(cues, nowMs);
+    const visemeContext = mouthHelpers.visemeContext(cues, nowMs);
+    const cue = visemeContext.current;
     const frames = data[stage].vocals?.frames || [];
     let frame = null;
     for (let index = frames.length - 1; index >= 0; index -= 1) { if (frames[index].timeMs <= nowMs) { frame = frames[index]; break; } }
     const shape = developerShape && audio.paused ? developerShape : mouthHelpers.effectiveShape(cue);
     const immediate = mouthHelpers.isSeekJump(previousMouthTimeMs, nowMs, config.seekSnapThresholdMs || 250);
-    mouthPreview.setViseme(shape, {immediate});
     const intensity = checked('#use-vocal-intensity') ? Number(cue?.intensity ?? 0) : .5;
     const pitch = cue?.pitchNormalized;
     const presence = frame?.presence ?? 1;
-    if (lastMouthIntensity == null || Math.abs(lastMouthIntensity - intensity) >= .02) { mouthPreview.setIntensity(intensity); lastMouthIntensity = intensity; }
-    if (lastMouthPitch == null || Math.abs(lastMouthPitch - Number(pitch ?? .5)) >= .03) { mouthPreview.setPitch(pitch); lastMouthPitch = Number(pitch ?? .5); }
-    if (lastMouthPresence == null || Math.abs(lastMouthPresence - presence) >= .03) { mouthPreview.setPresence(presence); lastMouthPresence = presence; }
+    const weights = developerShape && audio.paused ? {previousInfluence: 0, nextInfluence: 0} : coarticulation.coarticulationWeights({cue, timeMs: nowMs, windowMs: config.mouthCoarticulationMs || 60, hasPrevious: Boolean(visemeContext.previous), hasNext: Boolean(visemeContext.next)});
+    const pose = developerPose && audio.paused ? mouthPoseApi.createMouthPose(developerPose) : articulationMapper.map({
+      viseme: shape,
+      previousViseme: visemeContext.previous ? mouthHelpers.effectiveShape(visemeContext.previous) : null,
+      nextViseme: visemeContext.next ? mouthHelpers.effectiveShape(visemeContext.next) : null,
+      intensity,
+      pitchNormalized: pitch,
+      presence,
+      ...weights,
+    });
+    mouthPreview.setPose(pose, {immediate, continuous: !audio.paused});
+    currentRenderedPose = pose;
+    currentRenderedShape = shape;
     previousMouthTimeMs = nowMs;
     const source = cue?.reviewedShape ? 'Human override' : cue ? 'AI / Rhubarb' : 'No active cue';
-    const cueIndex = cue ? cues.indexOf(cue) : -1;
-    const previous = cueIndex > 0 ? mouthHelpers.effectiveShape(cues[cueIndex - 1]) : '—';
-    const next = cueIndex >= 0 && cueIndex < cues.length - 1 ? mouthHelpers.effectiveShape(cues[cueIndex + 1]) : '—';
+    const previous = visemeContext.previous ? mouthHelpers.effectiveShape(visemeContext.previous) : null;
+    const next = visemeContext.next ? mouthHelpers.effectiveShape(visemeContext.next) : null;
     const current = document.querySelector('#mouth-current-viseme'); const currentSource = document.querySelector('#mouth-current-source'); const expression = document.querySelector('#mouth-current-expression'); const comparator = document.querySelector('#mouth-comparator'); const rendererStatus = document.querySelector('#mouth-renderer-status');
-    if (current) current.textContent = `Viseme: ${shape}`;
+    if (current) current.textContent = `Rhubarb ${articulationLabel(shape)}`;
     if (currentSource) currentSource.textContent = source;
-    if (expression) expression.textContent = `Intensity: ${intensity.toFixed(2)}`;
-    if (comparator) comparator.innerHTML = `<span>Previous: ${previous}</span><strong>Current: ${shape}</strong><span>Next: ${next}</span>`;
-    if (rendererStatus) rendererStatus.textContent = mouthPreview.element?.dataset.rendererMode === 'anime' ? 'SVG · Anime.js' : 'SVG · snap fallback';
-    const debug = document.querySelector('#mouth-debug'); if (debug) { debug.hidden = !checked('#mouth-debug-toggle'); debug.textContent = `Current time: ${(nowMs / 1000).toFixed(3)} s · Current viseme: ${shape} · Cue: ${cue ? `${(cue.startMs / 1000).toFixed(3)}–${(cue.endMs / 1000).toFixed(3)}` : '—'} · Intensity: ${intensity.toFixed(2)}`; }
+    if (expression) expression.textContent = `Intensity: ${intensity.toFixed(2)} · Presence: ${Number(presence).toFixed(2)}`;
+    if (comparator) comparator.innerHTML = `<span>Previous: ${previous ? articulationLabel(previous) : '—'}</span><strong>Current: ${articulationLabel(shape)}</strong><span>Next: ${next ? articulationLabel(next) : '—'}</span>`;
+    if (rendererStatus) rendererStatus.textContent = mouthPreview.element?.dataset.rendererMode === 'anime' ? 'Anatomical SVG · Anime.js' : 'Anatomical SVG · snap fallback';
+    const debug = document.querySelector('#mouth-debug');
+    if (debug) {
+      debug.hidden = !checked('#mouth-debug-toggle');
+      debug.textContent = [`Current time: ${(nowMs / 1000).toFixed(3)} s`, `Rhubarb: ${shape}`, `Articulation: ${articulationTable[shape]?.alias || 'REST'}`, `Cue: ${cue ? `${(cue.startMs / 1000).toFixed(3)}–${(cue.endMs / 1000).toFixed(3)}` : '—'}`, `Coarticulation: previous ${weights.previousInfluence.toFixed(3)} · next ${weights.nextInfluence.toFixed(3)}`, ...mouthPoseApi.FIELDS.map(field => `${field}: ${pose[field].toFixed(3)}`)].join('\n');
+    }
   }
 
   async function loadReviewed() {
@@ -427,10 +430,10 @@
 
   function renderVisemeLanes(windowData) {
     const shapes = visemeShapes; const laneHeight = 42;
-    const {width, height} = resizeCanvas(shapes.length * laneHeight + 18); const plotLeft = 104; const plotWidth = width - plotLeft - 16;
+    const {width, height} = resizeCanvas(shapes.length * laneHeight + 18); const plotLeft = 142; const plotWidth = width - plotLeft - 16;
     const xFor = time => plotLeft + ((time - windowData.startMs) / (windowData.endMs - windowData.startMs)) * plotWidth;
     renderWindow = {...windowData, plotLeft, plotWidth, laneHeight, xFor}; context.clearRect(0, 0, width, height); drawCache = [];
-    shapes.forEach((shape, row) => { const top = 8 + row * laneHeight; context.fillStyle = '#eff2f8'; context.fillText(shape, 14, top + 25); drawVisemeReference(shape, 38, top + 20); context.strokeStyle = '#2a3140'; context.beginPath(); context.moveTo(plotLeft, top + laneHeight); context.lineTo(width, top + laneHeight); context.stroke(); });
+    shapes.forEach((shape, row) => { const top = 8 + row * laneHeight; context.fillStyle = '#eff2f8'; context.fillText(articulationLabel(shape), 8, top + 25); context.strokeStyle = '#2a3140'; context.beginPath(); context.moveTo(plotLeft, top + laneHeight); context.lineTo(width, top + laneHeight); context.stroke(); });
     visibleItems('vocals', windowData.startMs, windowData.endMs).forEach(cue => { const shape = cue.effectiveShape || cue.reviewedShape || cue.automaticShape || cue.shape; const row = shapes.indexOf(shape); if (row < 0) return; const x0 = xFor(cue.startMs), x1 = Math.max(x0 + 3, xFor(cue.endMs)), top = 8 + row * laneHeight + 7; context.fillStyle = cue.reviewedShape || cue.source === 'human' ? '#79f5ce' : '#f5b879'; context.fillRect(x0, top, x1 - x0, laneHeight - 14); context.fillStyle = '#17202e'; context.fillText(shape, x0 + 3, top + 18); drawCache.push({item: cue, channel: 'vocals', x0, x1, y0: top, y1: top + laneHeight - 14}); });
     const playhead = xFor(windowData.nowMs); context.strokeStyle = '#fff'; context.beginPath(); context.moveTo(playhead, 0); context.lineTo(playhead, height); context.stroke();
   }
@@ -785,10 +788,64 @@
   document.querySelector('#confirm-viseme')?.addEventListener('click', () => { const item = selectedEvent(); if (item) saveAction('CONFIRM_VISEME', {eventId: item.id}, 'vocals'); });
   document.querySelector('#delete-viseme')?.addEventListener('click', deleteSelectedViseme);
   document.querySelector('#add-viseme')?.addEventListener('click', () => saveAction('ADD', {event: {startMs: Math.round(audio.currentTime * 1000), endMs: Math.min(config.durationMs, Math.round(audio.currentTime * 1000 + 150)), shape: 'X', intensity: .5}}, 'vocals'));
-  document.querySelector('#use-vocal-intensity')?.addEventListener('change', () => { lastMouthIntensity = null; });
-  document.querySelector('#mouth-debug-toggle')?.addEventListener('change', event => { const controls = document.querySelector('#mouth-shape-controls'); if (controls) controls.hidden = !event.target.checked; if (!event.target.checked) developerShape = null; });
-  document.querySelectorAll('[data-mouth-shape]').forEach(button => button.addEventListener('click', () => { developerShape = button.dataset.mouthShape; mouthPreview?.setViseme(developerShape); }));
-  audio.addEventListener('ended', () => { previousMouthTimeMs = null; developerShape = null; mouthPreview?.reset(); });
+  document.querySelector('#use-vocal-intensity')?.addEventListener('change', () => { previousMouthTimeMs = null; });
+
+  const shapeControls = document.querySelector('#mouth-shape-controls');
+  const labPanel = document.querySelector('#articulation-lab');
+  const labControls = document.querySelector('#articulation-lab-controls');
+  if (shapeControls && articulationMapper) {
+    visemeShapes.forEach(shape => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.dataset.mouthShape = shape;
+      button.innerHTML = `<strong>${articulationTable[shape].alias.replace('-', ' ')}</strong><small>Rhubarb ${shape}</small>`;
+      button.addEventListener('click', () => {
+        developerShape = shape;
+        developerPose = mouthPoseApi.createMouthPose(articulationMapper.basePose(shape));
+        shapeControls.querySelectorAll('button').forEach(item => item.classList.toggle('active', item === button));
+        labControls?.querySelectorAll('input').forEach(input => { input.value = developerPose[input.dataset.poseField]; input.nextElementSibling.value = Number(input.value).toFixed(2); });
+        mouthPreview?.setPose(developerPose);
+      });
+      shapeControls.append(button);
+    });
+  }
+  if (labControls && mouthPoseApi) {
+    mouthPoseApi.FIELDS.forEach(field => {
+      const label = document.createElement('label');
+      label.innerHTML = `<span>${field}</span><input type="range" min="0" max="1" step="0.01" data-pose-field="${field}"><output>0.00</output>`;
+      const input = label.querySelector('input');
+      input.addEventListener('input', () => {
+        if (!developerPose) {
+          developerShape = currentRenderedShape;
+          developerPose = mouthPoseApi.createMouthPose(currentRenderedPose || articulationMapper.basePose(developerShape));
+        }
+        developerPose[field] = mouthPoseApi.clamp01(input.value);
+        input.nextElementSibling.value = developerPose[field].toFixed(2);
+        mouthPreview?.setPose(developerPose, {continuous: true});
+      });
+      labControls.append(label);
+    });
+  }
+  document.querySelector('#mouth-debug-toggle')?.addEventListener('change', event => {
+    if (shapeControls) shapeControls.hidden = !event.target.checked;
+    if (labPanel) labPanel.hidden = !event.target.checked;
+    if (!event.target.checked) { developerShape = null; developerPose = null; }
+  });
+  document.querySelector('#reset-pose-values')?.addEventListener('click', () => {
+    developerShape = developerShape || currentRenderedShape;
+    developerPose = mouthPoseApi.createMouthPose(articulationMapper.basePose(developerShape));
+    labControls?.querySelectorAll('input').forEach(input => { input.value = developerPose[input.dataset.poseField]; input.nextElementSibling.value = Number(input.value).toFixed(2); });
+    mouthPreview?.setPose(developerPose);
+  });
+  document.querySelector('#copy-pose-json')?.addEventListener('click', async () => {
+    const pose = developerPose || currentRenderedPose || articulationMapper.basePose(currentRenderedShape);
+    try { await navigator.clipboard.writeText(JSON.stringify(pose, null, 2)); setSaveStatus('Pose JSON copied.'); }
+    catch (error) { setSaveStatus(`Could not copy pose: ${error.message}`, 'error'); }
+  });
+  audio.addEventListener('ended', () => {
+    previousMouthTimeMs = null; developerShape = null; developerPose = null;
+    mouthPreview?.reset(articulationMapper?.basePose('X'));
+  });
   document.querySelector('#review-undo')?.addEventListener('click', () => cursor('undo'));
   document.querySelector('#review-redo')?.addEventListener('click', () => cursor('redo'));
   document.querySelector('#previous-unreviewed')?.addEventListener('click', () => navigateUnreviewed(-1));

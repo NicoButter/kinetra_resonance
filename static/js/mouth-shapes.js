@@ -1,16 +1,51 @@
-/* Central visual targets for the Kinetra Review Editor mouth rig. */
+/*
+ * Canonical Rhubarb-code -> articulation -> base MouthPose mapping.
+ * Rhubarb codes are animation positions, not literal phoneme names.
+ */
 (() => {
-  const pose = (upperLip, lowerLip, interior, teethOpacity, tongueOpacity, jawY) => ({upperLip, lowerLip, interior, teethOpacity, tongueOpacity, jawY});
-  const MOUTH_SHAPES = {
-    A: pose('M48 84 Q110 77 172 84', 'M48 86 Q110 92 172 86', 'M50 84 Q110 80 170 84 Q110 90 50 84Z', 0, 0, 0),
-    B: pose('M47 78 Q110 68 173 78', 'M47 93 Q110 103 173 93', 'M47 79 Q110 64 173 79 Q110 108 47 79Z', .94, 0, 2),
-    C: pose('M45 72 Q110 54 175 72', 'M45 102 Q110 120 175 102', 'M45 73 Q110 47 175 73 Q110 127 45 73Z', .18, 0, 5),
-    D: pose('M42 64 Q110 35 178 64', 'M42 111 Q110 140 178 111', 'M42 65 Q110 25 178 65 Q110 150 42 65Z', .08, .08, 10),
-    E: pose('M63 68 Q110 54 157 68', 'M63 104 Q110 118 157 104', 'M64 69 Q110 47 156 69 Q110 125 64 69Z', 0, 0, 5),
-    F: pose('M72 76 Q110 63 148 76', 'M72 96 Q110 109 148 96', 'M73 77 Q110 58 147 77 Q110 114 73 77Z', 0, 0, 3),
-    G: pose('M46 74 Q110 55 174 74', 'M46 91 Q110 102 174 91', 'M46 75 Q110 52 174 75 Q110 111 46 75Z', 1, 0, 2),
-    H: pose('M48 71 Q110 52 172 71', 'M48 101 Q110 120 172 101', 'M48 72 Q110 46 172 72 Q110 127 48 72Z', .1, 1, 6),
-    X: pose('M50 81 Q110 76 170 81', 'M50 89 Q110 94 170 89', 'M51 82 Q110 78 169 82 Q110 93 51 82Z', 0, 0, 0),
-  };
-  globalThis.KinetraMouthShapes = MOUTH_SHAPES;
+  const poseApi = globalThis.KinetraMouthPose || (typeof require !== 'undefined' ? require('./mouth-pose.js') : null);
+  const define = (alias, label, values) => Object.freeze({alias, label, pose: poseApi.createMouthPose(values, {freeze: true})});
+  const ARTICULATIONS = Object.freeze({
+    A: define('MBP', 'Closed / pressure', {
+      jawOpen: .02, lipOpen: 0, lipWidth: .62, lipClosure: 1, lipPressure: .78,
+    }),
+    B: define('CONS', 'Consonants / small', {
+      jawOpen: .16, lipOpen: .12, lipWidth: .72, lipSpread: .32,
+      lipClosure: .12, lipPressure: .15, upperTeethVisible: .78, lowerTeethVisible: .18,
+    }),
+    C: define('OPEN-MID', 'Open mid', {
+      jawOpen: .42, lipOpen: .48, lipWidth: .70, lipSpread: .20,
+      upperTeethVisible: .12, lowerTeethVisible: .05,
+    }),
+    D: define('OPEN-WIDE', 'Open wide', {
+      jawOpen: .86, lipOpen: .90, lipWidth: .80, lipSpread: .12,
+      upperTeethVisible: .04, lowerTeethVisible: .04, tongueVisible: .08,
+    }),
+    E: define('ROUND', 'Round', {
+      jawOpen: .34, lipOpen: .34, lipWidth: .50, lipRound: .74, lipPucker: .18,
+      upperTeethVisible: .04,
+    }),
+    F: define('UW', 'Puckered UW', {
+      jawOpen: .18, lipOpen: .14, lipWidth: .31, lipRound: 1, lipPucker: .94,
+      lipClosure: .04, lipPressure: .08, upperTeethVisible: .01,
+    }),
+    G: define('FV', 'Labiodental FV', {
+      jawOpen: .18, lipOpen: .12, lipWidth: .68, lipRound: .05, lipSpread: .20,
+      lipClosure: .03, lipPressure: .12, upperTeethVisible: 1,
+      lowerTeethVisible: .08, lowerLipRaise: .78, labiodentalContact: 1,
+    }),
+    H: define('L', 'Tongue-raised L', {
+      jawOpen: .50, lipOpen: .52, lipWidth: .68, lipRound: .08, lipSpread: .14,
+      upperTeethVisible: .68, lowerTeethVisible: .05, lowerLipRaise: .10,
+      tongueVisible: .90, tongueRaise: 1, tongueForward: .68,
+    }),
+    X: define('REST', 'Relaxed rest', {
+      jawOpen: .06, lipOpen: .025, lipWidth: .64, lipRound: .03,
+      lipClosure: .78, lipPressure: 0,
+    }),
+  });
+  const validShape = shape => Object.hasOwn(ARTICULATIONS, shape) ? shape : 'X';
+  const api = Object.freeze({ARTICULATIONS, validShape, entry: shape => ARTICULATIONS[validShape(shape)]});
+  globalThis.KinetraMouthShapes = api;
+  if (typeof module !== 'undefined') module.exports = api;
 })();

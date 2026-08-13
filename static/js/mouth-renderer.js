@@ -1,11 +1,9 @@
 (() => {
   class MouthRenderer {
-    setViseme() { throw new Error('MouthRenderer.setViseme must be implemented.'); }
-    setIntensity() {}
-    setPitch() {}
-    setPresence() {}
-    reset() { this.setViseme('X', {immediate: true}); }
+    setPose() { throw new Error('MouthRenderer.setPose must be implemented.'); }
+    reset(pose, options = {}) { if (pose) this.setPose(pose, {...options, immediate: true}); }
     destroy() {}
   }
   globalThis.MouthRenderer = MouthRenderer;
+  if (typeof module !== 'undefined') module.exports = {MouthRenderer};
 })();

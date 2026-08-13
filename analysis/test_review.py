@@ -238,7 +238,8 @@ class ReviewEngineTests(TestCase):
         self.assertTrue(response.json()['batchId'])
 
     def test_review_editor_includes_full_track_scrubber(self):
-        response = self.client.get(reverse('review-editor', args=[self.job.id]))
+        with override_settings(MOUTH_COARTICULATION_MS=72):
+            response = self.client.get(reverse('review-editor', args=[self.job.id]))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'id="track-scrubber"')
         self.assertContains(response, 'Full track navigation')
@@ -246,6 +247,12 @@ class ReviewEngineTests(TestCase):
         self.assertContains(response, 'data-drum-lane="kick"')
         self.assertContains(response, 'Confirm AI suggestion')
         self.assertContains(response, '<dt>Enter</dt>', html=True)
+        self.assertContains(response, 'ARTICULATION PREVIEW')
+        self.assertContains(response, 'Articulation Lab')
+        self.assertContains(response, 'js/mouth-pose.js')
+        self.assertContains(response, 'js/articulation-mapper.js')
+        self.assertContains(response, 'js/mouth-coarticulation.js')
+        self.assertEqual(response.context['lab_config']['mouthCoarticulationMs'], 72)
         editor_script = (Path(__file__).resolve().parents[1] / 'static' / 'js' / 'lab.js').read_text()
         self.assertIn('const drumLane = item => effectiveDrumType(item);', editor_script)
         self.assertIn("filter(item => drumReviewState(item) === 'UNREVIEWED')", editor_script)

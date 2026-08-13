@@ -102,24 +102,32 @@
 .mouth-preview-panel { margin-top: 14px; overflow: hidden; }
 .mouth-preview-heading { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
 .mouth-preview-heading h2 { margin: 0; }
-.mouth-preview-stage { min-height: 280px; display: grid; place-items: center; margin: 12px 0; border: 1px solid var(--line); border-radius: 10px; background: radial-gradient(circle at 50% 38%, #252c3c, #10141d 70%); }
-.mouth-rig { width: min(100%, 480px); max-height: 290px; overflow: visible; }
-.mouth-nose-guide, .mouth-jaw-guide { fill: none; stroke: #7e8290; stroke-width: 2; opacity: .42; }
+.mouth-preview-stage { min-height: 320px; display: grid; place-items: center; margin: 12px 0; border: 1px solid var(--line); border-radius: 10px; background: radial-gradient(circle at 50% 38%, #252c3c, #10141d 70%); }
+.mouth-rig { width: min(100%, 520px); max-height: 330px; overflow: visible; }
+.mouth-nose-guide, .mouth-jaw { fill: none; stroke: #7e8290; stroke-width: 2; opacity: .42; transform-origin: 130px 105px; }
 .mouth-interior { fill: #241c2a; stroke: #120d16; stroke-width: 2; }
-.mouth-upper-lip, .mouth-lower-lip { fill: none; stroke: #f5a99d; stroke-width: 10; stroke-linecap: round; stroke-linejoin: round; }
-.mouth-upper-teeth { fill: #fff7e7; transition: opacity 50ms linear; }
+.mouth-upper-lip, .mouth-lower-lip { fill: #d98082; stroke: #f5a99d; stroke-width: 1.5; stroke-linejoin: round; }
+.mouth-upper-teeth, .mouth-lower-teeth { fill: #fff7e7; stroke: #d8ccba; stroke-width: .8; transition: opacity 50ms linear; }
 .mouth-tongue { fill: #e9829d; transition: opacity 50ms linear; }
-.mouth-expression { transform-origin: 110px 85px; transition: transform 90ms ease-out; }
+.mouth-root { transform-origin: 130px 105px; }
 .mouth-targets { display: none; }
 .mouth-preview-readout, .mouth-comparator { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px 16px; text-align: center; }
 .mouth-preview-readout strong { color: var(--accent); }
 .mouth-preview-readout span, .mouth-comparator span { color: var(--muted); }
 .mouth-comparator { margin: 10px 0; padding: 8px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font-size: 13px; }
-.mouth-shape-controls { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
-.mouth-shape-controls button { min-width: 34px; border: 1px solid var(--line); border-radius: 5px; background: #10141d; color: var(--ink); cursor: pointer; }
-.mouth-shape-controls button:hover { border-color: var(--accent); color: var(--accent); }
+.mouth-shape-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); gap: 6px; margin: 10px 0; }
+.mouth-shape-controls button { min-height: 52px; border: 1px solid var(--line); border-radius: 5px; background: #10141d; color: var(--ink); cursor: pointer; }
+.mouth-shape-controls button strong, .mouth-shape-controls button small { display: block; }
+.mouth-shape-controls button small { margin-top: 3px; color: var(--muted); }
+.mouth-shape-controls button:hover, .mouth-shape-controls button.active { border-color: var(--accent); color: var(--accent); }
+.articulation-lab { margin-top: 12px; padding: 10px; border: 1px solid var(--line); border-radius: 7px; }
+.articulation-lab-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 7px 18px; margin: 10px 0; }
+.articulation-lab-controls label { display: grid; grid-template-columns: minmax(120px, 1fr) 2fr 38px; gap: 7px; align-items: center; margin: 0; font-size: 12px; }
+.articulation-lab-controls input { width: 100%; padding: 0; accent-color: var(--accent); }
+.articulation-lab-controls output { font-variant-numeric: tabular-nums; text-align: right; }
+.mouth-debug { max-height: 310px; overflow: auto; margin-top: 10px; white-space: pre-wrap; }
 
-@media (prefers-reduced-motion: reduce) { .mouth-expression, .mouth-upper-teeth, .mouth-tongue { transition-duration: 0ms; } }
+@media (prefers-reduced-motion: reduce) { .mouth-upper-teeth, .mouth-lower-teeth, .mouth-tongue { transition-duration: 0ms; } }
 
 .review-main .lab-canvas-wrap canvas.timeline-panning {
   cursor: grabbing;
