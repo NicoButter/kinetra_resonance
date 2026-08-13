@@ -19,10 +19,31 @@
 <section class="panel">
   <p class="eyebrow">Vocal Lip Sync</p>
   <h2>Rhubarb · {{ vocal_lip_sync.status|default:'UNAVAILABLE'|upper }}</h2>
-  <p>Version: {{ vocal_lip_sync.backendVersion|default:'—' }} · Recognizer: {{ vocal_lip_sync.recognizer|default:'—' }} · Mouth cues: {{ vocal_lip_sync.cueCount|default:0 }} · Visemes: {{ vocal_lip_sync.visemeCount|default:0 }} · {{ vocal_lip_sync.processingTime|default:0|floatformat:2 }} s</p>
+  <p>Version: {{ vocal_lip_sync.backendVersion|default:'—' }} · Recognizer: {{ vocal_lip_sync.recognizer|default:'—' }} · Input: {{ vocal_lip_sync.inputFile|default:'—' }} · Mouth cues: {{ vocal_lip_sync.cueCount|default:0 }} · Visemes: {{ vocal_lip_sync.visemeCount|default:0 }} · {{ vocal_lip_sync.processingTime|default:0|floatformat:2 }} s</p>
   {% if vocal_lip_sync.status == 'unavailable' or not vocal_lip_sync.available %}<p class="notice error">Rhubarb Lip Sync is unavailable. Mouth animation cannot be generated.</p>{% endif %}
   {% for warning in vocal_lip_sync.warnings %}<p class="notice error">{{ warning }}</p>{% endfor %}
   {% if vocal_lip_sync.reason %}<p class="notice error">{{ vocal_lip_sync.reason }}</p>{% endif %}
+</section>
+{% endif %}
+{% if vocal_isolation %}
+<section class="panel">
+  <p class="eyebrow">VOCAL ACCESSIBILITY EXTRACTION</p>
+  <h2>{{ vocal_isolation.status|default:'UNKNOWN'|upper }}</h2>
+  <p>Profile: {{ job.get_vocal_accessibility_profile_display }} · Backend: {{ vocal_isolation.backend|default:'—' }} · Preset: {{ vocal_isolation.preset|default:'—' }}</p>
+  <p>Input: {{ vocal_isolation.source|default:'—' }} · Output: {{ vocal_isolation.output|default:'—' }} · Passes: {{ vocal_isolation.passes|default:0 }} · Device: {{ vocal_isolation.device|default:'—' }} · {{ vocal_isolation.processingTime|default:0|floatformat:2 }} s</p>
+  {% if vocal_isolation.fallbackUsed %}<p class="notice error">Specialized isolation failed; Rhubarb used the standard 6-stem vocal fallback.</p>{% endif %}
+  {% for warning in vocal_isolation.warnings %}<p class="notice error">{{ warning }}</p>{% endfor %}
+</section>
+{% endif %}
+{% if vocal_comparison %}
+<section class="panel">
+  <p class="eyebrow">VOCAL SOURCE COMPARISON</p>
+  <h2>Standard ↔ Clean</h2>
+  <div class="cards">
+    <div class="card"><strong>STANDARD</strong><span>Duration: {{ vocal_comparison.standard.audio.durationMs }} ms</span><small>RMS {{ vocal_comparison.standard.audio.rms }} · activity {{ vocal_comparison.standard.audio.activityCoverage }} · near silence {{ vocal_comparison.standard.audio.nearSilenceRatio }}{% if vocal_comparison.standard.rhubarb %}<br>Rhubarb cues {{ vocal_comparison.standard.rhubarb.cueCount }} · coverage {{ vocal_comparison.standard.rhubarb.cueCoverage }} · X {{ vocal_comparison.standard.rhubarb.xRatio }} · short {{ vocal_comparison.standard.rhubarb.extremelyShortCueRatio }}{% endif %}</small></div>
+    <div class="card"><strong>CLEAN</strong><span>Duration: {{ vocal_comparison.clean.audio.durationMs }} ms</span><small>RMS {{ vocal_comparison.clean.audio.rms }} · activity {{ vocal_comparison.clean.audio.activityCoverage }} · near silence {{ vocal_comparison.clean.audio.nearSilenceRatio }}{% if vocal_comparison.clean.rhubarb %}<br>Rhubarb cues {{ vocal_comparison.clean.rhubarb.cueCount }} · coverage {{ vocal_comparison.clean.rhubarb.cueCoverage }} · X {{ vocal_comparison.clean.rhubarb.xRatio }} · short {{ vocal_comparison.clean.rhubarb.extremelyShortCueRatio }}{% endif %}</small></div>
+  </div>
+  <p class="muted">{{ vocal_comparison.note }}</p>
 </section>
 {% endif %}
 {% if drum_transcription %}
@@ -49,7 +70,7 @@
 </section>
 <section class="panel narrow">
   <h2>Reprocess</h2><p class="muted">Uses the existing original audio and replaces current stems and artifacts. Job history is preserved.</p>
-  <form action="{% url 'track-reprocess' track.id %}" method="post">{% csrf_token %}{% for field in reprocess_form %}<p><label>{{ field.label }}</label>{{ field }}{% if field.help_text %}<small class="muted">{{ field.help_text }}</small>{% endif %}</p>{% endfor %}<button class="button" type="submit">Reprocess</button></form>
+  <form action="{% url 'track-reprocess' track.id %}" method="post">{% csrf_token %}{% for field in reprocess_form %}{% if field.name == 'vocal_refinement_enabled' %}<details><summary>Advanced / debug</summary><p><label>{{ field }} {{ field.label }}</label>{% if field.help_text %}<small class="muted">{{ field.help_text }}</small>{% endif %}</p></details>{% else %}<p><label>{{ field.label }}</label>{{ field }}{% if field.help_text %}<small class="muted">{{ field.help_text }}</small>{% endif %}</p>{% endif %}{% endfor %}<button class="button" type="submit">Reprocess</button></form>
 </section>
 {% if job %}<script>const box=document.querySelector('#job');const terminal=['COMPLETED','INCOMPLETE','FAILED','CANCELLED'];function poll(){fetch(`/api/jobs/${box.dataset.job}/status/`).then(r=>r.json()).then(j=>{document.querySelector('#status').textContent=j.status;document.querySelector('#stage').textContent=`${j.currentStage} · ${j.progress}%`;document.querySelector('#progress').style.width=`${j.progress}%`;document.querySelector('#error').textContent=j.errorMessage||'';if(!terminal.includes(j.status))setTimeout(poll,3000);else location.reload();});}if(!terminal.includes('{{ job.status }}'))poll();</script>{% endif %}
 {% endblock %}

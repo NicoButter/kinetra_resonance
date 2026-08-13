@@ -8,6 +8,12 @@ class ProcessingProfile(models.TextChoices):
     VOCAL_EXTRACTION = 'VOCAL_EXTRACTION', 'Vocal extraction — Vocals + Instrumental'
 
 
+class VocalAccessibilityProfile(models.TextChoices):
+    STANDARD = 'STANDARD', 'Standard'
+    CLEAN_LIPSYNC = 'CLEAN_LIPSYNC', 'Clean for Lip Sync'
+    MAXIMUM_QUALITY = 'MAXIMUM_QUALITY', 'Maximum Quality / Experimental'
+
+
 class ProcessingJob(models.Model):
     class Status(models.TextChoices):
         PENDING = 'PENDING', 'Pending'; PREPARING = 'PREPARING', 'Preparing'; SEPARATING = 'SEPARATING', 'Separating instruments'; ANALYZING = 'ANALYZING', 'Analyzing drums'; COMPLETED = 'COMPLETED', 'Completed'; INCOMPLETE = 'INCOMPLETE', 'Incomplete'; FAILED = 'FAILED', 'Failed'; CANCELLED = 'CANCELLED', 'Cancelled'
@@ -18,6 +24,12 @@ class ProcessingJob(models.Model):
     progress = models.PositiveSmallIntegerField(default=0, validators=[MinValueValidator(0), MaxValueValidator(100)])
     current_stage = models.CharField(max_length=100, default='Waiting to start')
     separator_model = models.CharField(max_length=255, blank=True)
+    vocal_accessibility_profile = models.CharField(
+        max_length=24,
+        choices=VocalAccessibilityProfile.choices,
+        default=VocalAccessibilityProfile.CLEAN_LIPSYNC,
+    )
+    vocal_refinement_enabled = models.BooleanField(default=False)
     metadata = models.JSONField(default=dict, blank=True)
     error_message = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

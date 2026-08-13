@@ -640,7 +640,9 @@
 
   async function auditionViseme() {
     const item = selectedEvent(); if (!item || selectedChannel !== 'vocals') return;
-    const vocalsSource = config.audioSources.find(source => source.key === 'vocals'); if (!vocalsSource) { setSaveStatus('The vocals.wav source is unavailable.', 'error'); return; }
+    const preferredKey = config.lipSyncInputSource === 'vocals_lipsync' ? 'vocals_lipsync' : 'vocals';
+    const vocalsSource = config.audioSources.find(source => source.key === preferredKey) || config.audioSources.find(source => source.key === 'vocals');
+    if (!vocalsSource) { setSaveStatus('The selected vocal source is unavailable.', 'error'); return; }
     audio.pause(); if (sourceSelect.value !== vocalsSource.url) { sourceSelect.value = vocalsSource.url; audio.src = vocalsSource.url; await waitForMetadata(); }
     audio.currentTime = Math.max(0, item.startMs - 100) / 1000; const end = (item.endMs + 100) / 1000; const listener = () => { if (audio.currentTime >= end) { audio.pause(); audio.removeEventListener('timeupdate', listener); } }; audio.addEventListener('timeupdate', listener); await audio.play();
   }

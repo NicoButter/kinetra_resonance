@@ -141,6 +141,15 @@ TELEO_SEPARATOR_MODEL = os.environ.get('TELEO_SEPARATOR_MODEL', 'htdemucs_6s.yam
 VOCAL_SEPARATOR_MODEL = os.environ.get('VOCAL_SEPARATOR_MODEL', 'UVR-MDX-NET-Inst_HQ_4.onnx')
 # Backwards-compatible alias for integrations that still read the old setting.
 AUDIO_SEPARATOR_DEFAULT_MODEL = TELEO_SEPARATOR_MODEL
+_audio_separator_model_dir = Path(os.environ.get('AUDIO_SEPARATOR_MODEL_DIR', BASE_DIR / 'var' / 'models' / 'audio-separator'))
+AUDIO_SEPARATOR_MODEL_DIR = _audio_separator_model_dir if _audio_separator_model_dir.is_absolute() else BASE_DIR / _audio_separator_model_dir
+VOCAL_ISOLATION_PRESET = os.environ.get('VOCAL_ISOLATION_PRESET', 'vocal_clean')
+VOCAL_ISOLATION_CPU_FALLBACK = os.environ.get('VOCAL_ISOLATION_CPU_FALLBACK', 'true').lower() in {'1', 'true', 'yes'}
+VOCAL_ISOLATION_FALLBACK_ALLOWED = os.environ.get('VOCAL_ISOLATION_FALLBACK_ALLOWED', 'true').lower() in {'1', 'true', 'yes'}
+VOCAL_ISOLATION_REQUIRED = os.environ.get('VOCAL_ISOLATION_REQUIRED', 'false').lower() in {'1', 'true', 'yes'}
+VOCAL_REFINEMENT_ENABLED = os.environ.get('VOCAL_REFINEMENT_ENABLED', 'false').lower() in {'1', 'true', 'yes'}
+VOCAL_REFINEMENT_MAX_PASSES = min(2, max(1, int(os.environ.get('VOCAL_REFINEMENT_MAX_PASSES', '2'))))
+VOCAL_COMPARISON_ENABLED = os.environ.get('VOCAL_COMPARISON_ENABLED', 'false').lower() in {'1', 'true', 'yes'}
 MAX_UPLOAD_SIZE_MB = int(os.environ.get('MAX_UPLOAD_SIZE_MB', '250'))
 
 # Optional automatic drum transcription. ADTOF is imported only while a drums

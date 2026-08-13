@@ -1,4 +1,6 @@
 import logging
+import time
+from pathlib import Path
 
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
@@ -6,13 +8,14 @@ from django.utils import timezone
 
 from analysis.models import AnalysisArtifact
 from analysis.postprocessing import MusicalPostProcessor, QualityValidator
-from analysis.lip_sync import LipSyncError, VocalLipSyncService
+from analysis.lip_sync import LipSyncError, VocalLipSyncQualityValidator, VocalLipSyncService
 from analysis.services import (
     BassAnalyzer, DrumsAnalyzer, GuitarAnalyzer, IncompleteExperienceError,
     OtherAnalyzer, PianoAnalyzer, TeleoExperienceBuilder, VocalsAnalyzer,
 )
 from processing.models import ProcessingJob, ProcessingProfile
 from processing.services import StemSeparationService
+from processing.vocal_isolation import VocalIsolationError, VocalIsolationService
 from tracks.models import Stem
 
 
@@ -50,7 +53,10 @@ class Command(BaseCommand):
 
         track = job.track
         separator = StemSeparationService()
+        vocal_isolator = VocalIsolationService()
+        vocal_isolation = None
         current_analyzer = 'separator'
+        pipeline_started = time.perf_counter()
         try:
             model = job.separator_model or separator.model_for_profile(job.profile)
             job.separator_model = model
@@ -68,7 +74,11 @@ class Command(BaseCommand):
             job.current_stage = 'Separating six stems' if job.profile == ProcessingProfile.TELEO_6_STEM else 'Extracting vocals'
             job.save(update_fields=['status', 'progress', 'current_stage'])
 
+            separation_started = time.perf_counter()
             result = separator.separate(track, job.profile, model)
+            separation_time = time.perf_counter() - separation_started
+            job.metadata = {**job.metadata, 'processingTimes': {'sixStemSeparation': round(separation_time, 3)}}
+            job.save(update_fields=['metadata'])
             missing = separator.missing_required_stems(result) if job.profile == ProcessingProfile.TELEO_6_STEM else set()
             if missing:
                 expected = separator.format_stem_types(separator.PROFILE_STEMS[job.profile])
@@ -82,6 +92,42 @@ class Command(BaseCommand):
                 job.save()
                 return
 
+            if Stem.Type.VOCALS in result.stems:
+                current_analyzer = 'VocalIsolationService'
+                job.current_stage = 'Isolating vocals for lip sync'
+                job.progress = 63
+                job.save(update_fields=['current_stage', 'progress'])
+                try:
+                    vocal_isolation = vocal_isolator.isolate(job, expected_duration_ms=track.duration_ms)
+                    job.metadata = {**job.metadata, 'vocalIsolation': vocal_isolation.metadata()}
+                    try:
+                        standard_result = vocal_isolator.standard_result(job, expected_duration_ms=track.duration_ms)
+                        job.metadata['vocalIsolationComparison'] = {
+                            'standard': {'audio': standard_result.quality.metadata()},
+                            'clean': {'audio': vocal_isolation.quality.metadata()},
+                            'note': 'Technical diagnostics only; no automatic winner is selected.',
+                        }
+                    except VocalIsolationError as comparison_error:
+                        logger.warning('[VOCAL_ISOLATION] A/B audio diagnostics unavailable: %s', comparison_error)
+                except VocalIsolationError as exc:
+                    failure = {
+                        'purpose': 'lip-sync', 'source': 'original', 'backend': 'audio-separator',
+                        'profile': job.vocal_accessibility_profile, 'preset': settings.VOCAL_ISOLATION_PRESET,
+                        'status': 'failed', 'fallbackUsed': False, 'warnings': [str(exc)],
+                    }
+                    job.metadata = {**job.metadata, 'vocalIsolation': failure}
+                    job.save(update_fields=['metadata'])
+                    if settings.VOCAL_ISOLATION_REQUIRED or not settings.VOCAL_ISOLATION_FALLBACK_ALLOWED:
+                        raise
+                    logger.warning('[VOCAL_ISOLATION] failed; using explicit standard-vocal fallback: %s', exc)
+                    vocal_isolation = vocal_isolator.standard_result(
+                        job, expected_duration_ms=track.duration_ms,
+                        fallback_used=True, warnings=(f'Specialized vocal isolation failed: {exc}',),
+                    )
+                    failure.update({'fallbackUsed': True, 'fallbackSource': 'standard_vocals'})
+                    job.metadata = {**job.metadata, 'vocalIsolation': failure}
+                job.save(update_fields=['metadata'])
+
             job.status = ProcessingJob.Status.ANALYZING
             for stem_type, artifact_type, analyzer_class, stage, progress in self.ANALYZERS:
                 stem = result.stems.get(stem_type)
@@ -94,22 +140,68 @@ class Command(BaseCommand):
                 payload, path = analyzer_class().write(job, stem)
                 if stem_type == Stem.Type.VOCALS:
                     logger.info('[VOCALS] Starting vocal analysis for job=%s', job.id)
+                    lip_sync_source = vocal_isolation.output_path if vocal_isolation else stem.file.path
+                    input_source = 'vocals_lipsync' if vocal_isolation and vocal_isolation.source == 'original' else 'standard_vocals'
+                    if input_source == 'vocals_lipsync':
+                        current_analyzer = 'VocalIsolationService'
+                        job.current_stage = 'Validating isolated vocals'
+                        job.progress = max(progress, 90)
+                        job.save(update_fields=['current_stage', 'progress'])
+                        from processing.vocal_isolation import VocalIsolationQualityReport
+                        current_quality = VocalIsolationQualityReport.analyze(lip_sync_source, payload.get('durationMs'))
+                        if not current_quality.valid:
+                            raise VocalIsolationError('; '.join(current_quality.warnings) or 'Vocal isolation output failed duration validation.')
                     current_analyzer = 'VocalLipSyncService'
                     job.current_stage = 'Generating lip sync'
                     job.progress = max(progress, 91)
                     job.save(update_fields=['current_stage', 'progress'])
-                    lip_sync = VocalLipSyncService().analyze(stem.file.path, duration_ms=payload.get('durationMs'), language=getattr(track, 'language', None))
-                    payload['lipSync'] = lip_sync.metadata()
+                    lip_sync_started = time.perf_counter()
+                    lip_sync = VocalLipSyncService().analyze(lip_sync_source, duration_ms=payload.get('durationMs'), language=getattr(track, 'language', None))
+                    lip_sync_metadata = {**lip_sync.metadata(), 'inputSource': input_source, 'inputFile': Path(lip_sync_source).name}
+                    lip_sync_metadata['qualityDiagnostics'] = VocalLipSyncQualityValidator().validate(
+                        lip_sync.cues, payload.get('durationMs') or track.duration_ms or 0, lip_sync.status,
+                    ).get('metrics', {})
+                    payload['lipSync'] = lip_sync_metadata
                     payload['mouthCues'] = lip_sync.cues
                     # Analyzer write APIs are deliberately simple; overwrite its job-owned raw manifest.
                     from analysis.services import write_payload
                     _, path = write_payload(job, 'vocals.json', payload, folder='raw')
                     write_payload(job, 'frames.json', {'format': 'kinetra-vocal-frames', 'version': 1, 'frames': payload.get('frames', [])}, folder='raw/vocals')
-                    write_payload(job, 'mouth_cues.json', {'format': 'kinetra-vocal-visemes', 'version': 1, 'analysis': lip_sync.metadata(), 'mouthCues': lip_sync.cues}, folder='raw/vocals')
-                    job.metadata = {**job.metadata, 'vocalLipSync': lip_sync.metadata()}
+                    write_payload(job, 'mouth_cues.json', {'format': 'kinetra-vocal-visemes', 'version': 1, 'analysis': lip_sync_metadata, 'mouthCues': lip_sync.cues}, folder='raw/vocals')
+                    timings = dict(job.metadata.get('processingTimes', {}))
+                    timings.update({
+                        'vocalIsolation': round(vocal_isolation.processing_time, 3) if vocal_isolation else 0,
+                        'rhubarb': round(time.perf_counter() - lip_sync_started, 3),
+                    })
+                    job.metadata = {**job.metadata, 'vocalLipSync': lip_sync_metadata, 'processingTimes': timings}
                     job.save(update_fields=['metadata'])
                     if settings.LIPSYNC_REQUIRED and lip_sync.status != 'success':
                         raise LipSyncError('Required vocal lip-sync failed: ' + '; '.join(lip_sync.warnings))
+                    if settings.VOCAL_COMPARISON_ENABLED and input_source == 'vocals_lipsync':
+                        standard_path = vocal_isolator.standard_vocals(job)
+                        standard_lip_sync = VocalLipSyncService().analyze(
+                            standard_path, duration_ms=payload.get('durationMs'), language=getattr(track, 'language', None),
+                        )
+                        standard_metadata = {
+                            **standard_lip_sync.metadata(), 'inputSource': 'standard_vocals',
+                            'inputFile': standard_path.name,
+                        }
+                        standard_metadata['qualityDiagnostics'] = VocalLipSyncQualityValidator().validate(
+                            standard_lip_sync.cues, payload.get('durationMs') or track.duration_ms or 0, standard_lip_sync.status,
+                        ).get('metrics', {})
+                        write_payload(job, 'visemes.json', {
+                            'format': 'kinetra-vocal-visemes-experiment', 'version': 1,
+                            'analysis': standard_metadata, 'visemes': standard_lip_sync.cues,
+                        }, folder='experiments/vocals/standard')
+                        write_payload(job, 'visemes.json', {
+                            'format': 'kinetra-vocal-visemes-experiment', 'version': 1,
+                            'analysis': lip_sync_metadata, 'visemes': lip_sync.cues,
+                        }, folder='experiments/vocals/clean')
+                        comparison = dict(job.metadata.get('vocalIsolationComparison', {}))
+                        comparison.setdefault('standard', {})['rhubarb'] = standard_metadata['qualityDiagnostics']
+                        comparison.setdefault('clean', {})['rhubarb'] = lip_sync_metadata['qualityDiagnostics']
+                        job.metadata = {**job.metadata, 'vocalIsolationComparison': comparison}
+                        job.save(update_fields=['metadata'])
                 self.register_artifact(job, stem, artifact_type, path, AnalysisArtifact.Stage.RAW)
                 if stem_type == Stem.Type.DRUMS:
                     track.duration_ms = payload['durationMs']
@@ -121,7 +213,7 @@ class Command(BaseCommand):
 
             if job.profile == ProcessingProfile.TELEO_6_STEM:
                 current_analyzer = 'MusicalPostProcessor'
-                job.current_stage = 'Post-processing musical events'
+                job.current_stage = 'Post-processing vocals and musical events'
                 job.progress = 94
                 job.save(update_fields=['current_stage', 'progress'])
                 MusicalPostProcessor().process(job)
@@ -143,6 +235,9 @@ class Command(BaseCommand):
             job.progress = 100
             job.current_stage = 'Teleo Experience ready' if job.profile == ProcessingProfile.TELEO_6_STEM else 'Results ready'
             job.finished_at = timezone.now()
+            timings = dict(job.metadata.get('processingTimes', {}))
+            timings['total'] = round(time.perf_counter() - pipeline_started, 3)
+            job.metadata = {**job.metadata, 'processingTimes': timings}
             job.save()
         except IncompleteExperienceError as exc:
             job.status = ProcessingJob.Status.INCOMPLETE

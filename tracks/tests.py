@@ -5,7 +5,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from analysis.models import AnalysisArtifact, ReviewAction, ReviewSession
-from processing.models import ProcessingJob, ProcessingProfile
+from processing.models import ProcessingJob, ProcessingProfile, VocalAccessibilityProfile
 from .forms import TrackUploadForm
 from .models import Stem, Track, track_source_path
 from .services import TrackDeletionError, TrackDeletionService
@@ -37,6 +37,8 @@ class TrackTests(TestCase):
         launch.assert_called_with(job.id)
     def test_form_defaults_to_teleo_profile(self):
         self.assertEqual(TrackUploadForm().fields['profile'].initial, ProcessingProfile.TELEO_6_STEM)
+        self.assertEqual(TrackUploadForm().fields['vocal_accessibility_profile'].initial, VocalAccessibilityProfile.CLEAN_LIPSYNC)
+        self.assertFalse(TrackUploadForm().fields['vocal_refinement_enabled'].initial)
     @patch('tracks.views.launch_processing')
     def test_reprocess_preserves_track_and_creates_job_history(self, launch):
         track = self.make_track()
@@ -67,6 +69,29 @@ class TrackTests(TestCase):
         self.assertContains(response, 'id="lab-audio"')
         self.assertContains(response, 'id="analysis-canvas"')
         self.assertContains(response, 'Minimum confidence')
+
+    def test_job_lab_exposes_job_owned_clean_vocal_for_ab_audition(self):
+        track = self.make_track()
+        stem = Stem.objects.create(track=track, type=Stem.Type.VOCALS)
+        stem.file.save('vocals.wav', ContentFile(b'standard'), save=True)
+        job = ProcessingJob.objects.create(track=track)
+        clean = TEST_MEDIA / 'tracks' / str(track.id) / 'analysis' / str(job.id) / 'intermediate' / 'vocals' / 'vocals_lipsync.wav'
+        clean.parent.mkdir(parents=True, exist_ok=True)
+        clean.write_bytes(b'clean')
+
+        response = self.client.get(reverse('job-lab', args=[job.id]))
+
+        self.assertContains(response, 'Vocals \\u2014 6 Stem')
+        self.assertContains(response, 'Vocals \\u2014 Lip Sync Clean')
+        self.assertContains(response, str(job.id))
+
+    def test_old_job_without_clean_file_keeps_standard_vocal_source(self):
+        track = self.make_track()
+        Stem.objects.create(track=track, type=Stem.Type.VOCALS, file=f'tracks/{track.id}/stems/vocals.wav')
+        job = ProcessingJob.objects.create(track=track, vocal_accessibility_profile=VocalAccessibilityProfile.STANDARD)
+        response = self.client.get(reverse('job-lab', args=[job.id]))
+        self.assertContains(response, 'Vocals \\u2014 6 Stem')
+        self.assertNotContains(response, 'Vocals \\u2014 Lip Sync Clean')
 
     def test_delete_removes_complete_track_aggregate_and_its_media_directory(self):
         track = self.make_track()

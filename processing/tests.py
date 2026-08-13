@@ -6,8 +6,9 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.test import TestCase, override_settings
 
-from processing.models import ProcessingJob, ProcessingProfile
+from processing.models import ProcessingJob, ProcessingProfile, VocalAccessibilityProfile
 from processing.services import SeparationError, SeparationResult, StemSeparationService
+from processing.vocal_isolation import VocalIsolationError
 from tracks.models import Stem, Track
 
 
@@ -78,12 +79,28 @@ class ProcessingCommandTests(TestCase):
     @patch('analysis.postprocessing.QualityValidator.validate')
     @patch('analysis.postprocessing.MusicalPostProcessor.process')
     @patch('analysis.services.BaseAnalyzer.write')
+    @patch('processing.management.commands.process_track.VocalLipSyncService.analyze')
+    @patch('processing.vocal_isolation.VocalIsolationQualityReport.analyze')
+    @patch('processing.management.commands.process_track.VocalIsolationService.standard_result')
+    @patch('processing.management.commands.process_track.VocalIsolationService.isolate')
     @patch('processing.services.StemSeparationService.separate')
     @override_settings(LIPSYNC_REQUIRED=False)
-    def test_job_completes_with_six_stems_and_analysis(self, separate, analyze, postprocess, validate, build, clear):
+    def test_job_completes_with_six_stems_and_analysis(self, separate, isolate, standard_result, isolation_quality, lip_sync, analyze, postprocess, validate, build, clear):
         job = self.make_job()
         stems = {stem_type: Stem.objects.create(track=job.track, type=stem_type, file=f'tracks/{job.track_id}/stems/{stem_type.lower()}.wav') for stem_type in StemSeparationService.PROFILE_STEMS[job.profile]}
         separate.return_value = SeparationResult(job.profile, job.separator_model, stems)
+        isolate.return_value = SimpleNamespace(
+            output_path=Path(stems[Stem.Type.VOCALS].file.path), source='original',
+            processing_time=.2,
+            quality=SimpleNamespace(metadata=lambda: {'durationMs': 1000}),
+            metadata=lambda: {'status': 'success', 'source': 'original'},
+        )
+        standard_result.return_value = SimpleNamespace(quality=SimpleNamespace(metadata=lambda: {'durationMs': 1000}))
+        isolation_quality.return_value = SimpleNamespace(valid=True, warnings=[])
+        lip_sync.return_value = SimpleNamespace(
+            status='success', cues=[{'startMs': 0, 'endMs': 100, 'automaticShape': 'A'}],
+            warnings=[], metadata=lambda: {'status': 'success', 'cueCount': 1},
+        )
         artifact_path = TEST_MEDIA / 'tracks' / str(job.track_id) / 'analysis' / 'artifact.json'
         analyze.return_value = ({'durationMs': 1000, 'transcription': {'backend': 'adtof', 'device': 'cpu', 'processingTime': 1.2}}, artifact_path)
         build.return_value = ({'version': 1}, TEST_MEDIA / 'tracks' / str(job.track_id) / 'analysis' / 'teleo_experience.json')
@@ -92,3 +109,53 @@ class ProcessingCommandTests(TestCase):
         self.assertEqual(job.status, ProcessingJob.Status.COMPLETED)
         self.assertEqual(job.analysis_artifacts.count(), 7)
         self.assertEqual(job.metadata['drumTranscription']['backend'], 'adtof')
+        self.assertEqual(job.metadata['vocalLipSync']['inputSource'], 'vocals_lipsync')
+        self.assertEqual(Path(lip_sync.call_args.args[0]), isolate.return_value.output_path)
+
+    @patch('processing.services.StemSeparationService.clear_previous_outputs')
+    @patch('analysis.services.TeleoExperienceBuilder.build')
+    @patch('analysis.postprocessing.QualityValidator.validate')
+    @patch('analysis.postprocessing.MusicalPostProcessor.process')
+    @patch('analysis.services.BaseAnalyzer.write')
+    @patch('processing.management.commands.process_track.VocalLipSyncService.analyze')
+    @patch('processing.management.commands.process_track.VocalIsolationService.standard_result')
+    @patch('processing.management.commands.process_track.VocalIsolationService.isolate', side_effect=VocalIsolationError('clean failed'))
+    @patch('processing.services.StemSeparationService.separate')
+    @override_settings(LIPSYNC_REQUIRED=False, VOCAL_ISOLATION_REQUIRED=False, VOCAL_ISOLATION_FALLBACK_ALLOWED=True)
+    def test_clean_failure_uses_explicit_standard_rhubarb_fallback(self, separate, isolate, standard_result, lip_sync, analyze, postprocess, validate, build, clear):
+        job = self.make_job()
+        stems = {stem_type: Stem.objects.create(track=job.track, type=stem_type, file=f'tracks/{job.track_id}/stems/{stem_type.lower()}.wav') for stem_type in StemSeparationService.PROFILE_STEMS[job.profile]}
+        separate.return_value = SeparationResult(job.profile, job.separator_model, stems)
+        standard_path = Path(stems[Stem.Type.VOCALS].file.path)
+        standard_result.return_value = SimpleNamespace(output_path=standard_path, source='standard_vocals', processing_time=0)
+        lip_sync.return_value = SimpleNamespace(status='success', cues=[], warnings=[], metadata=lambda: {'status': 'success', 'cueCount': 0})
+        artifact_path = TEST_MEDIA / 'tracks' / str(job.track_id) / 'analysis' / 'artifact.json'
+        analyze.return_value = ({'durationMs': 1000, 'transcription': {}}, artifact_path)
+        build.return_value = ({'version': 1}, TEST_MEDIA / 'tracks' / str(job.track_id) / 'analysis' / 'teleo_experience.json')
+
+        call_command('process_track', str(job.id))
+
+        job.refresh_from_db()
+        self.assertEqual(job.status, ProcessingJob.Status.COMPLETED)
+        self.assertEqual(job.metadata['vocalIsolation']['status'], 'failed')
+        self.assertTrue(job.metadata['vocalIsolation']['fallbackUsed'])
+        self.assertEqual(job.metadata['vocalLipSync']['inputSource'], 'standard_vocals')
+        self.assertEqual(Path(lip_sync.call_args.args[0]), standard_path)
+
+    @patch('processing.management.commands.process_track.VocalLipSyncService.analyze')
+    @patch('processing.management.commands.process_track.VocalIsolationService.isolate', side_effect=VocalIsolationError('clean failed'))
+    @patch('processing.services.StemSeparationService.separate')
+    @patch('processing.services.StemSeparationService.clear_previous_outputs')
+    @override_settings(VOCAL_ISOLATION_REQUIRED=False, VOCAL_ISOLATION_FALLBACK_ALLOWED=False)
+    def test_clean_failure_without_fallback_does_not_run_rhubarb(self, clear, separate, isolate, lip_sync):
+        job = self.make_job()
+        stems = {stem_type: SimpleNamespace() for stem_type in StemSeparationService.PROFILE_STEMS[job.profile]}
+        separate.return_value = SeparationResult(job.profile, job.separator_model, stems)
+
+        call_command('process_track', str(job.id))
+
+        job.refresh_from_db()
+        self.assertEqual(job.status, ProcessingJob.Status.FAILED)
+        self.assertIn('VocalIsolationService failed', job.current_stage)
+        self.assertNotIn('vocalLipSync', job.metadata)
+        lip_sync.assert_not_called()

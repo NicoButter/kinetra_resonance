@@ -1,4 +1,4 @@
 Django
 numpy
 essentia
-audio-separator[gpu]
+audio-separator[gpu]>=0.44.5,<0.45

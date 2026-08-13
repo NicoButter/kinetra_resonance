@@ -175,7 +175,7 @@ class RhubarbLipSyncBackend:
 
     def analyze(self, audio_path, *, language=None, dialog_path=None):
         audio = Path(audio_path)
-        if not audio.is_file(): raise LipSyncError('vocals.wav is unavailable for lip-sync analysis.')
+        if not audio.is_file(): raise LipSyncError('The selected vocal source is unavailable for lip-sync analysis.')
         logger.info('[LIPSYNC] Resolving Rhubarb binary')
         health = RhubarbHealthCheck(self.binary, runner=self.runner).check(include_path=True)
         if not health['available']:
@@ -259,9 +259,26 @@ class VocalLipSyncQualityValidator:
         if not cues: warnings.append('No mouth cues were produced.')
         invalid = any(c['startMs'] < 0 or c['endMs'] <= c['startMs'] or c['endMs'] > duration_ms + 250 for c in cues)
         if invalid: warnings.append('Invalid mouth-cue timestamps.')
-        covered = sum(c['endMs'] - c['startMs'] for c in cues)
+        intervals = []
+        for cue in sorted(cues, key=lambda item: (item['startMs'], item['endMs'])):
+            if intervals and cue['startMs'] <= intervals[-1][1]:
+                intervals[-1][1] = max(intervals[-1][1], cue['endMs'])
+            else:
+                intervals.append([cue['startMs'], cue['endMs']])
+        covered = sum(end - start for start, end in intervals)
         if cues and covered < max(100, duration_ms * .01): warnings.append('Mouth-cue coverage is extremely low.')
         if len(cues) > max(1000, duration_ms // 10): warnings.append('Excessive number of very short mouth cues.')
         score = 0.9 if cues and not warnings else 0.55 if cues else 0.1
+        cue_duration = sum(c['endMs'] - c['startMs'] for c in cues)
+        short_count = sum(c['endMs'] - c['startMs'] < 40 for c in cues)
+        x_count = sum((c.get('automaticShape') or c.get('shape')) == 'X' for c in cues)
         return {'status': 'reliable' if score >= .7 else 'warning' if score >= .4 else 'unreliable', 'score': score, 'warnings': warnings,
-                'metrics': {'cueCount': len(cues), 'coveredMs': covered}}
+                'metrics': {
+                    'cueCount': len(cues),
+                    'coveredMs': covered,
+                    'cueCoverage': round(covered / duration_ms, 4) if duration_ms else 0.0,
+                    'xRatio': round(x_count / len(cues), 4) if cues else 0.0,
+                    'averageCueDurationMs': round(cue_duration / len(cues), 2) if cues else 0.0,
+                    'extremelyShortCueRatio': round(short_count / len(cues), 4) if cues else 0.0,
+                    'visemeChangesPerSecond': round(len(cues) / (duration_ms / 1000), 4) if duration_ms else 0.0,
+                }}

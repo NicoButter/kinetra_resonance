@@ -1,8 +1,10 @@
 import json
 import os
+from pathlib import Path
 
 from django.conf import settings
 from django.contrib import messages
+from django.core.files.storage import default_storage
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -36,7 +38,11 @@ def track_create(request):
             track.source_file.save(original_name, audio, save=True)
             profile = form.cleaned_data['profile']
             model = form.cleaned_data['separator_model'] or StemSeparationService.model_for_profile(profile)
-            job = ProcessingJob.objects.create(track=track, profile=profile, separator_model=model)
+            job = ProcessingJob.objects.create(
+                track=track, profile=profile, separator_model=model,
+                vocal_accessibility_profile=form.cleaned_data['vocal_accessibility_profile'],
+                vocal_refinement_enabled=form.cleaned_data['vocal_refinement_enabled'],
+            )
             launch_processing(job.id)
             return redirect('track-detail', track_id=track.id)
     else:
@@ -93,6 +99,8 @@ def track_detail(request, track_id):
     }
     drum_transcription = (job.metadata or {}).get('drumTranscription') if job else None
     vocal_lip_sync = (job.metadata or {}).get('vocalLipSync') if job else None
+    vocal_isolation = (job.metadata or {}).get('vocalIsolation') if job else None
+    vocal_comparison = (job.metadata or {}).get('vocalIsolationComparison') if job else None
     vocals_artifact = artifacts.get(AnalysisArtifact.Type.VOCALS)
     if vocal_lip_sync and vocals_artifact:
         try:
@@ -104,7 +112,7 @@ def track_detail(request, track_id):
         vocal_lip_sync = RhubarbHealthCheck().check()
         vocal_lip_sync['status'] = 'available' if vocal_lip_sync['available'] else 'unavailable'
         vocal_lip_sync['backendVersion'] = vocal_lip_sync.get('version')
-    return render(request, 'tracks/track_detail.html', {'track': track, 'job': job, 'artifact_rows': artifact_rows, 'experience': experience, 'reviewed_experience': reviewed_experience, 'drum_transcription': drum_transcription, 'vocal_lip_sync': vocal_lip_sync, 'reprocess_form': ReprocessTrackForm(), 'can_delete': can_delete})
+    return render(request, 'tracks/track_detail.html', {'track': track, 'job': job, 'artifact_rows': artifact_rows, 'experience': experience, 'reviewed_experience': reviewed_experience, 'drum_transcription': drum_transcription, 'vocal_lip_sync': vocal_lip_sync, 'vocal_isolation': vocal_isolation, 'vocal_comparison': vocal_comparison, 'reprocess_form': ReprocessTrackForm(), 'can_delete': can_delete})
 
 
 @require_POST
@@ -114,7 +122,11 @@ def track_reprocess(request, track_id):
     if form.is_valid():
         profile = form.cleaned_data['profile']
         model = form.cleaned_data['separator_model'] or StemSeparationService.model_for_profile(profile)
-        job = ProcessingJob.objects.create(track=track, profile=profile, separator_model=model)
+        job = ProcessingJob.objects.create(
+            track=track, profile=profile, separator_model=model,
+            vocal_accessibility_profile=form.cleaned_data['vocal_accessibility_profile'],
+            vocal_refinement_enabled=form.cleaned_data['vocal_refinement_enabled'],
+        )
         launch_processing(job.id)
     return redirect('track-detail', track_id=track.id)
 
@@ -157,14 +169,29 @@ def lab(request):
     return render(request, 'tracks/lab.html', {'rows': rows})
 
 
-def job_lab(request, job_id):
-    job = get_object_or_404(ProcessingJob.objects.select_related('track').prefetch_related('track__stems', 'analysis_artifacts'), id=job_id)
+def _audio_sources_for_job(job):
     audio_sources = [{'key': 'original', 'label': 'Original', 'url': job.track.source_file.url}]
-    stem_order = ('VOCALS', 'DRUMS', 'BASS', 'GUITAR', 'PIANO', 'OTHER')
     stems = {stem.type: stem for stem in job.track.stems.all()}
-    for stem_type in stem_order:
+    if 'VOCALS' in stems:
+        audio_sources.append({'key': 'vocals', 'label': 'Vocals — 6 Stem', 'url': stems['VOCALS'].file.url})
+    directory = Path(settings.MEDIA_ROOT) / 'tracks' / str(job.track_id) / 'analysis' / str(job.id) / 'intermediate' / 'vocals'
+    specialized = (
+        ('vocals_lipsync', 'Vocals — Lip Sync Clean', directory / 'vocals_lipsync.wav'),
+        ('vocals_refinement_pass2', 'Vocals — Refinement Pass 2', directory / 'vocals_clean_pass2.wav'),
+    )
+    for key, label, path in specialized:
+        if path.is_file():
+            relative = path.relative_to(settings.MEDIA_ROOT).as_posix()
+            audio_sources.append({'key': key, 'label': label, 'url': default_storage.url(relative)})
+    for stem_type in ('DRUMS', 'BASS', 'GUITAR', 'PIANO', 'OTHER'):
         if stem_type in stems:
             audio_sources.append({'key': stem_type.lower(), 'label': stems[stem_type].get_type_display(), 'url': stems[stem_type].file.url})
+    return audio_sources
+
+
+def job_lab(request, job_id):
+    job = get_object_or_404(ProcessingJob.objects.select_related('track').prefetch_related('track__stems', 'analysis_artifacts'), id=job_id)
+    audio_sources = _audio_sources_for_job(job)
     artifact_urls = {'raw': {}, 'processed': {}}
     for artifact in job.analysis_artifacts.filter(type__in=('DRUMS', 'BASS', 'GUITAR', 'PIANO', 'VOCALS', 'OTHER')):
         artifact_urls[artifact.stage.lower()][artifact.type.lower()] = artifact.json_file.url
@@ -180,12 +207,7 @@ def review_editor(request, job_id):
         ReviewEngine().load_processed(job)
     except ReviewValidationError as exc:
         return render(request, 'tracks/review_unavailable.html', {'job': job, 'error': str(exc)}, status=409)
-    audio_sources = [{'key': 'original', 'label': 'Original', 'url': job.track.source_file.url}]
-    stem_order = ('VOCALS', 'DRUMS', 'BASS', 'GUITAR', 'PIANO', 'OTHER')
-    stems = {stem.type: stem for stem in job.track.stems.all()}
-    for stem_type in stem_order:
-        if stem_type in stems:
-            audio_sources.append({'key': stem_type.lower(), 'label': stems[stem_type].get_type_display(), 'url': stems[stem_type].file.url})
+    audio_sources = _audio_sources_for_job(job)
     artifact_urls = {'raw': {}, 'processed': {}}
     for artifact in job.analysis_artifacts.filter(stage__in=(AnalysisArtifact.Stage.RAW, AnalysisArtifact.Stage.PROCESSED), type__in=('DRUMS', 'BASS', 'GUITAR', 'PIANO', 'VOCALS', 'OTHER')):
         artifact_urls[artifact.stage.lower()][artifact.type.lower()] = artifact.json_file.url
@@ -194,6 +216,7 @@ def review_editor(request, job_id):
         'audioSources': audio_sources, 'artifacts': artifact_urls,
         'windowBeforeMs': 5000, 'windowAfterMs': 10000,
         'mouthTransitionMs': settings.MOUTH_PREVIEW_TRANSITION_MS,
+        'lipSyncInputSource': (job.metadata or {}).get('vocalLipSync', {}).get('inputSource', 'standard_vocals'),
         'seekSnapThresholdMs': 250,
         'review': {
             'sessionId': str(session.id), 'status': session.status,

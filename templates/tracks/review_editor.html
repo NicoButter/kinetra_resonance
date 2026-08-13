@@ -76,7 +76,7 @@
     </section>
     <section id="vocal-toolbar" class="panel" hidden><strong>Vocal cue audit</strong><span class="muted"> Drag a cue vertically to its correct mouth shape. Shift + drag horizontally moves its timing.</span><div class="button-row"><button id="audition-viseme" class="button secondary" type="button">▶ Play cue</button><button id="confirm-viseme" class="button secondary" type="button">Confirm viseme</button><button id="delete-viseme" class="button secondary danger" type="button">Delete selected cue</button><button id="add-viseme" class="button secondary" type="button">Add mouth cue at playhead</button></div></section>
     <section id="mouth-preview-panel" class="panel mouth-preview-panel" hidden>
-      <div class="mouth-preview-heading"><div><p class="eyebrow">VOCALS</p><h2>MOUTH PREVIEW</h2></div><span id="mouth-renderer-status" class="muted">SVG</span></div>
+      <div class="mouth-preview-heading"><div><p class="eyebrow">VOCALS</p><h2>MOUTH PREVIEW</h2><p class="muted">Lip Sync source: <strong>{% if job.metadata.vocalLipSync.inputSource == 'vocals_lipsync' %}CLEAN VOCAL{% else %}STANDARD VOCAL{% endif %}</strong></p></div><span id="mouth-renderer-status" class="muted">SVG</span></div>
       <div id="mouth-preview" class="mouth-preview-stage"></div>
       <div class="mouth-preview-readout"><strong id="mouth-current-viseme">Viseme: X</strong><span id="mouth-current-source">No active cue</span><span id="mouth-current-expression">Intensity: 0.00</span></div>
       <div id="mouth-comparator" class="mouth-comparator"><span>Previous: —</span><strong>Current: X</strong><span>Next: —</span></div>

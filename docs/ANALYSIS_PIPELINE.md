@@ -91,3 +91,6 @@ El job avanza por separación, análisis de cada stem y construcción de experie
 ## Evolución
 
 Las interfaces mantienen separados los analizadores para incorporar transcripción polifónica, modelos de percusión, `VisemeAnalyzer`, `LyricsAnalyzer`, alineación, traducción, secciones y generación háptica sin cambiar el contrato superior del schema v1 mientras sea posible.
+## Vocal accessibility branch
+
+The master audio now feeds two independent branches. `htdemucs_6s` continues to own music-analysis stems. For lip-sync, the selected vocal accessibility profile resolves a separate input before Rhubarb: Standard reuses `stems/vocals.wav`, while Clean (the default) uses the original audio with audio-separator's official `vocal_clean` preset. The job-owned clean WAV and diagnostics live beneath `analysis/<job UUID>/intermediate/vocals/`. Teleo still consumes only canonical processed/reviewed visemes and receives no separator model names or local paths.

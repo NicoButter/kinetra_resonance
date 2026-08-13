@@ -20,6 +20,8 @@ media/
 input/
 output/
 models/
+var/models/audio-separator/
+var/models/audio-separator/**/*.tmp
 *.wav
 *.mp3
 *.flac
