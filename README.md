@@ -5,18 +5,15 @@
 Kinetra Resonance converts music into structured temporal data for visual and tactile experiences. Stem separation is an intermediate processing step, not the final product.
 
 ```text
-Audio
-  ↓
-Stem Separation
-  ↓
-drums.wav → optional ADTOF transcription + Kinetra onset/intensity fusion
-          → automatic coarse drum families
-  ↓
-Musical Post-processing → Human Review
-  ↓
-Structured Timeline
-  ↓
-Visual / Haptic Applications
+Audio original
+  ├─ audio-separator + htdemucs_6s → 6 stems → análisis musical
+  │                                      └─ drums.wav → ADTOF opcional + onsets Kinetra
+  │                                                       → familias automáticas
+  └─ audio-separator `vocal_clean` opcional → Rhubarb Lip Sync → visemas A–H/X
+                                                        ↓
+                         Postprocesamiento → revisión humana → timeline estructurada
+                                                        ↓
+                                        Aplicaciones visuales / hápticas
 ```
 
 ## Qué hace hoy
@@ -27,16 +24,19 @@ Visual / Haptic Applications
 - Detecta y registra únicamente los stems producidos: vocals, drums, bass, guitar, piano, other e instrumental.
 - Ejecuta analizadores RAW específicos para drums, bass, guitar, piano, vocals y other.
 - Propone cinco familias de batería —kick, snare, hi-hat, tom y cymbal— mediante el backend ADTOF opcional, y conserva onsets locales no emparejados como `UNASSIGNED`.
+- Puede aislar una voz limpia para Rhubarb Lip Sync y proponer visemas A–H/X; las correcciones humanas siempre prevalecen.
 - Postprocesa eventos musicales sin sobrescribir los datos RAW y valida calidad por canal.
 - Construye `teleo_experience.json` exclusivamente desde artifacts procesados confiables.
 - Muestra progreso con polling, conteos, tamaños y descargas, y conserva historial de trabajos.
 
 ## Inicio rápido
 
-El repositorio ya incluye un entorno `.venv` con las dependencias del proyecto.
+Instalá las dependencias núcleo y ejecutá las migraciones:
 
 ```bash
+python -m venv .venv
 source .venv/bin/activate
+pip install -r requirements.txt
 python manage.py migrate
 python manage.py runserver
 ```
@@ -64,11 +64,18 @@ DJANGO_SECRET_KEY=
 DJANGO_DEBUG=True
 TELEO_SEPARATOR_MODEL=htdemucs_6s.yaml
 VOCAL_SEPARATOR_MODEL=UVR-MDX-NET-Inst_HQ_4.onnx
+AUDIO_SEPARATOR_MODEL_DIR=var/models/audio-separator
+VOCAL_ISOLATION_PRESET=vocal_clean
+VOCAL_ISOLATION_FALLBACK_ALLOWED=true
 MAX_UPLOAD_SIZE_MB=250
 DRUM_TRANSCRIPTION_BACKEND=adtof
 DRUM_TRANSCRIPTION_DEVICE=auto
 DRUM_TRANSCRIPTION_ENABLED=True
 DRUM_EVENT_MATCH_TOLERANCE_MS=50
+RHUBARB_ENABLED=true
+RHUBARB_RECOGNIZER=phonetic
+RHUBARB_EXTENDED_SHAPES=GHX
+LIPSYNC_REQUIRED=true
 ```
 
 `auto` usa CUDA solo si `torch.cuda.is_available()` devuelve verdadero. Un fallo CUDA reintenta en CPU. Si el backend no está instalado, falla al cargar o entrega MIDI inválido, el job continúa con el detector local y eventos `UNASSIGNED` para clasificación humana.
@@ -76,6 +83,21 @@ DRUM_EVENT_MATCH_TOLERANCE_MS=50
 El perfil predeterminado, **Teleo Music — 6 stems**, usa `htdemucs_6s.yaml` y exige vocals, drums, bass, guitar, piano y other. El perfil opcional **Vocal extraction** usa `UVR-MDX-NET-Inst_HQ_4.onnx`. El soporte GPU depende del runtime local; la primera ejecución de cada modelo puede requerir descargarlo.
 
 Una canción existente puede reprocesarse desde su página de detalle con otro perfil o modelo sin volver a subir el audio. Cada intento conserva su `ProcessingJob`; los stems y artifacts representan siempre la salida vigente.
+
+## IA, extensiones e integraciones
+
+Kinetra ejecuta sus modelos y herramientas de análisis localmente: no usa APIs de OpenAI, ChatGPT, Whisper, Gemini, Anthropic ni otros servicios de IA en la nube.
+
+| Componente | Uso | Estado |
+| --- | --- | --- |
+| `audio-separator` + `htdemucs_6s.yaml` | Separación musical de seis stems. | Núcleo local. |
+| `audio-separator` + `vocal_clean` | Voz limpia opcional para el análisis de lip-sync. | Local; admite fallback explícito a `stems/vocals.wav`. |
+| Rhubarb Lip Sync | Propuesta de visemas temporales A–H/X; no letras ni fonemas verificados. | Binario local externo. |
+| ADTOF-pytorch | Propuesta de cinco familias de batería. | Opcional y experimental; hay fallback a onsets `UNASSIGNED`. |
+| Essentia + NumPy + algoritmos Kinetra | BPM, onsets, energía, pitch y postprocesamiento. | Análisis determinista, no IA generativa. |
+| Anime.js + SVG | Visualización articulatoria de los visemas en el Review Editor. | Interfaz local; no participa en el análisis ni en Teleo Android. |
+
+Los pesos se almacenan localmente y no se versionan en Git. El inventario completo —incluyendo entrada/salida, variables, fallbacks, runtimes, licencias y límites— está en [Integraciones, extensiones e IA](docs/INTEGRATIONS_AND_AI.md).
 
 ## Archivos producidos
 
@@ -131,6 +153,7 @@ La documentación ampliada está en:
 
 - [Documentación técnica](docs/TECHNICAL.md)
 - [Pipeline de análisis y Teleo Experience](docs/ANALYSIS_PIPELINE.md)
+- [Integraciones, extensiones e IA](docs/INTEGRATIONS_AND_AI.md)
 - [Human Review y Resonance Review Editor](docs/HUMAN_REVIEW.md)
 - [Contexto para ChatGPT](docs/CHATGPT_CONTEXT.md)
 
@@ -164,7 +187,7 @@ Al finalizar se generan `reviewed/v<version>/*.json` y `teleo_experience.reviewe
 
 ### Mouth Preview Renderer
 
-El canal VOCALS del Review Editor representa los visemas de Rhubarb mediante `MouthRenderer` y su implementación local `SvgAnimeMouthRenderer`. La cadena es `Rhubarb visemes → MouthRenderer → SVG morphing`; usa `audio.currentTime` como único reloj y Anime.js 4.5.0 únicamente para suavizar transiciones entre poses A–H/X. El bundle y su licencia MIT están versionados en `static/vendor/animejs/`, por lo que no hace falta npm ni Internet al clonar el proyecto. Es una herramienta de auditoría de Kinetra Resonance, no el renderer final de Teleo.
+El canal VOCALS del Review Editor representa los visemas de Rhubarb mediante `ArticulationMapper`, `MouthPose`, `MouthRenderer` y su implementación local `SvgAnimeMouthRenderer`. La cadena es `Rhubarb visemes → pose articulatoria normalizada → SVG`; usa `audio.currentTime` como único reloj y Anime.js 4.5.0 únicamente para suavizar transiciones visuales. El bundle y su licencia MIT están versionados en `static/vendor/animejs/`, por lo que no hace falta npm ni Internet al clonar el proyecto. Es una herramienta de auditoría de Kinetra Resonance, no el renderer final de Teleo.
 
 La revisión vocal no altera los resultados automáticos de Rhubarb: crea `ReviewAction` sobre el artifact REVIEWED del Job seleccionado. En VOCALS, arrastrar una cue verticalmente la mueve al carril de visema A–H/X correcto (override humano); `Shift` + arrastre horizontal corrige su tiempo conservando duración; `Delete` elimina una detección errónea. También se puede confirmar, redimensionar, dividir o agregar cues. Undo/Redo reconstruye el resultado de forma no destructiva.
 
