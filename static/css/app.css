@@ -9,6 +9,8 @@ a:focus-visible,button:focus-visible{outline:3px solid var(--accent);outline-off
 .skip-link:focus{transform:translateY(0)}
 .site-header{gap:28px;padding-top:24px;padding-bottom:24px}
 .brand-lockup{display:inline-flex;flex-direction:column;line-height:1.15;font-size:21px;letter-spacing:.16em;flex-shrink:0}
+.navbar-logo{display:block;width:min(230px,42vw);height:auto;max-height:64px;object-fit:contain}
+.footer-logo{display:block;width:min(250px,58vw);height:auto;max-height:84px;object-fit:contain}
 .brand-lockup span{font-size:10px;letter-spacing:.32em;margin-top:6px}
 .site-nav{align-items:center;gap:24px;font-size:13px}
 .site-nav a:not(.button):hover,.footer-bottom a:hover,.text-link:hover{color:var(--accent)}

@@ -26,9 +26,9 @@ Rhubarb's mouth cues are visual visemes (A–H, X), not a linguistic truth. Sing
 
 Artifacts retain the compatible `vocals.json` manifest and add `raw/vocals/{frames,mouth_cues}.json`, `processed/vocals/{frames,visemes}.json`, and `reviewed/vN/vocals/visemes.json`. Teleo receives only compact viseme ranges, not local paths or backend diagnostics. The global timeline contains one event per viseme change, which allows a dispatcher without duplicating continuous voice frames.
 
-## Review Editor mouth preview
+## Analysis Lab and Review Editor mouth preview
 
-The Kinetra Resonance Review Editor displays processed/reviewed visemes with a local SVG mouth rig. `MouthRenderer` is the UI-facing abstraction and `SvgAnimeMouthRenderer` is the current implementation. It uses the vendored Anime.js 4.5.0 bundle (`static/vendor/animejs/`) to morph SVG layers, with no runtime network dependency and no frontend build step.
+Kinetra Resonance displays processed visemes in Analysis Lab and processed/reviewed visemes in Review Editor with a local SVG mouth rig. Selecting any vocal audio source focuses the A–H/X timeline and reveals the animation. `MouthRenderer` is the UI-facing abstraction and `SvgAnimeMouthRenderer` is the current implementation. It uses the vendored Anime.js 4.5.0 bundle (`static/vendor/animejs/`) to morph SVG layers, with no runtime network dependency and no frontend build step.
 
 The rig now receives normalized anatomical `MouthPose` values from `ArticulationMapper`; it does not interpret Rhubarb codes itself. See [Vocal articulation preview](VOCAL_ARTICULATION.md) for the canonical A–X mapping, coarticulation, expression bounds, and developer Articulation Lab.
 

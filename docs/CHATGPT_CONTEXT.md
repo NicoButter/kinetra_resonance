@@ -24,7 +24,7 @@ No descarga música, no acepta URLs, no elude DRM y no realiza ripping de plataf
 
 El repositorio contiene un MVP Django local funcional con:
 
-- interfaz web en `/` para ver canciones recientes;
+- landing responsive en `/` con explicación del flujo, navegación, branding y canciones recientes;
 - formulario en `/tracks/new/` para subir MP3, WAV, FLAC, M4A, AAC u OGG;
 - `Track`, `ProcessingJob`, `Stem` y `AnalysisArtifact` con UUIDs;
 - guardado aislado por canción en `media/tracks/<track_uuid>/`;
@@ -42,7 +42,9 @@ El repositorio contiene un MVP Django local funcional con:
 - `TeleoExperienceBuilder` que valida los seis artifacts y genera `teleo_experience.json`;
 - polling de estado en `/api/jobs/<uuid>/status/`;
 - APIs JSON internas de tracks, stems y artifacts;
-- página `/lab/` con análisis de batería finalizados;
+- página `/lab/` con análisis finalizados y laboratorio por job sincronizado con audio;
+- selección original/stems vinculada al canal visible, timeline con zoom/pan, scrubber global y Space para play/pausa;
+- timeline vocal A–H/X y boca SVG animada en Analysis Lab y Review Editor;
 - Django Admin.
 
 ## Arquitectura
@@ -53,7 +55,7 @@ tracks/      carga, modelos Track/Stem, vistas web y APIs
 processing/  ProcessingJob, servicio de separación y comando de gestión
 analysis/    AnalysisArtifact y DrumsAnalyzer
 templates/   interfaz Django
-static/      estilos
+static/      estilos, scripts del Lab/renderer, logos, favicon y dependencias frontend vendorizadas
 docs/        documentación de producto y técnica
 ```
 
@@ -99,7 +101,7 @@ El perfil predeterminado es `TELEO_6_STEM`, con `htdemucs_6s.yaml`. `VOCAL_EXTRA
 }
 ```
 
-Los timestamps están en milisegundos e `intensity` siempre pertenece a `[0.0, 1.0]`. `automaticType` es una sugerencia automática y nunca se sobrescribe; `reviewedType` contiene exclusivamente la asignación humana. ADTOF no aporta confidence por evento. El editor admite kick, snare, hi-hat, tom, crash, splash, ride, cymbal y unknown. Un hit sin revisión permanece visualmente en `UNASSIGNED` en HUMAN REVIEW VIEW.
+Los timestamps están en milisegundos e `intensity` siempre pertenece a `[0.0, 1.0]`. `automaticType` es una sugerencia automática y nunca se sobrescribe; `reviewedType` contiene exclusivamente la asignación humana. ADTOF no aporta confidence por evento. El editor admite kick, snare, hi-hat, tom, crash, splash, ride, cymbal y unknown. Un hit sin revisión aparece en la lane de `effectiveType` con estado `AI · UNREVIEWED`; `UNASSIGNED` se reserva para onsets sin clasificación.
 
 ## Restricciones para cambios futuros
 

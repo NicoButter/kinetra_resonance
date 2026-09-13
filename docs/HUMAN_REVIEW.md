@@ -43,7 +43,7 @@ Cada detección conserva dos verdades separadas:
 }
 ```
 
-`automaticType` es la familia propuesta; `automatic` conserva backend y evidencia disponible. ADTOF no entrega confidence por evento, por lo que queda `null`: la velocidad MIDI nunca se usa como confidence. `reviewedType` es la decisión humana. En HUMAN REVIEW VIEW todos los hits sin decisión humana se muestran en `UNASSIGNED`, aunque `effectiveType` pueda usar la propuesta como fallback. `UNKNOWN` significa que el golpe no pudo identificarse.
+`automaticType` es la familia propuesta; `automatic` conserva backend y evidencia disponible. ADTOF no entrega confidence por evento, por lo que queda `null`: la velocidad MIDI nunca se usa como confidence. `reviewedType` es la decisión humana. Los hits se posicionan por `effectiveType`: una propuesta automática de kick aparece en KICK aun antes de la confirmación, con estado `AI · UNREVIEWED`. `UNASSIGNED` queda para onsets sin clasificación y `UNKNOWN` significa que el golpe no pudo identificarse.
 
 Los tipos admitidos son `UNASSIGNED`, `KICK`, `SNARE`, `HI_HAT`, `TOM`, `CRASH`, `SPLASH`, `RIDE`, `CYMBAL` y `UNKNOWN`.
 
@@ -79,7 +79,7 @@ Ruta: `/review/jobs/<job_uuid>/`.
 
 Comparte el renderer Canvas con Analysis Lab. El único reloj musical es `audio.currentTime`; el dibujo usa `requestAnimationFrame`, búsqueda binaria y solo eventos visibles. En DRUMS se convierte en diez lanes con drag vertical para asignar y `Shift+drag` horizontal para cambiar `timeMs`. Incluye selección Ctrl/Cmd+click, rango Shift+click, marquee, filtros, contadores y asignación masiva.
 
-La barra **Full track navigation** permite recorrer la canción completa con pasos de 10 ms. Puede arrastrarse mientras el audio está pausado o reproduciéndose; actualiza directamente `audio.currentTime` sin cambiar el estado del reproductor.
+La barra **Full track navigation** permite recorrer la canción completa con pasos de 10 ms. Puede arrastrarse mientras el audio está pausado o reproduciéndose; actualiza directamente `audio.currentTime` sin cambiar el estado del reproductor. **Horizontal zoom** controla la ventana visible entre 0.25 y 30 segundos. Arrastrar un área vacía del Canvas desplaza el reloj hacia atrás o adelante.
 
 `Audition Hit` reproduce desde el único `drums.wav` una ventana configurable —150 ms antes y 350 ms después por defecto— y luego restaura fuente, posición, velocidad y estado de reproducción. `Rapid Drum Review` encadena unassigned → audition → shortcut → siguiente unassigned.
 

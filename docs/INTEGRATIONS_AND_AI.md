@@ -68,8 +68,8 @@ propuesta de Rhubarb: `reviewedShape` tiene precedencia sobre
 | --- | --- | --- |
 | Django | Aplicación local, jobs, persistencia, revisión y entrega de media/static. | No contiene IA; el procesamiento pesado corre fuera de la petición HTTP mediante `process_track`. |
 | Anime.js 4.5.0 | Suaviza morphs y transiciones discretas del SVG de la boca. | Bundle local en `static/vendor/animejs/`, licencia MIT, sin npm ni red en tiempo de ejecución. No interpreta fonemas. |
-| SVG + `SvgAnimeMouthRenderer` | Representa mandíbula, labios, dientes y lengua desde `MouthPose`. | Sólo recibe parámetros anatómicos normalizados; no conoce códigos Rhubarb. No es el renderer de Teleo Android. |
-| HTML Audio, Canvas y `requestAnimationFrame` | Reproducción y visualización sincronizada del Lab/Review Editor. | `audio.currentTime` es el único reloj; no existe una timeline paralela. Canvas no modifica artifacts. |
+| SVG + `SvgAnimeMouthRenderer` | Representa mandíbula, labios, dientes y lengua desde `MouthPose` en el Lab y el Review Editor. | Sólo recibe parámetros anatómicos normalizados; no conoce códigos Rhubarb. No es el renderer de Teleo Android. |
+| HTML Audio, Canvas y `requestAnimationFrame` | Reproducción, zoom, pan y visualización sincronizada del Lab/Review Editor. | `audio.currentTime` es el único reloj; no existe una timeline paralela. El Lab es de solo lectura; el editor persiste cambios como `ReviewAction` mediante la API. |
 
 ## Configuración mínima por caso
 

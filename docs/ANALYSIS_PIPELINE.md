@@ -52,7 +52,7 @@ MIDI es exclusivamente el transporte intermedio del adapter ADTOF. No forma part
 | `BassAnalyzer` | onsets por flujo espectral, pitch por autocorrelación | notas con rango, Hz, MIDI, nombre, intensidad y confianza | Omite pitch/MIDI cuando la confianza es menor a 0.45. |
 | `GuitarAnalyzer` | igual que bass, con rango de guitarra y descriptor de ataque | notas y ataque | Aproximación monofónica; acordes pueden no transcribirse correctamente. |
 | `PianoAnalyzer` | onsets y pitch conservador | colección de notas | El schema permite notas simultáneas, pero el algoritmo inicial no es una transcripción polifónica completa. |
-| `VocalsAnalyzer` | frames de 40 ms, energía, pitch por autocorrelación y brillo espectral | presencia, intensidad, pitch y brillo | No contiene letra, fonemas ni visemas. Reduce frames con pocos cambios. |
+| `VocalsAnalyzer` | frames de 40 ms, energía, pitch por autocorrelación y brillo espectral; enriquecimiento con cues de Rhubarb | presencia, intensidad, pitch, brillo y visemas A–H/X | No contiene letras ni fonemas verificados. Los visemas son aproximaciones visuales. |
 | `OtherAnalyzer` | energía FFT por bandas en frames de 50 ms | energía low/mid/high/overall normalizada | Describe ambiente energético, no identifica instrumentos. |
 
 Los timestamps y duraciones son enteros en milisegundos. Los valores normalizados se recortan a `[0, 1]` y usan hasta cuatro decimales. Todas las colecciones quedan ordenadas temporalmente.
@@ -61,9 +61,9 @@ Los timestamps y duraciones son enteros en milisegundos. Los valores normalizado
 
 El builder solo lee `AnalysisArtifact(stage=PROCESSED)` relacionados con el ProcessingJob actual y exige `DRUMS`, `BASS`, `GUITAR`, `PIANO`, `VOCALS` y `OTHER`. Si falta alguno, no genera una experiencia completa y el job termina en `INCOMPLETE`.
 
-La experiencia incluye metadatos del track, eventos/notas/frames por canal y los arrays futuros `visemes`, `lyrics`, `sections` y `haptics`, inicialmente vacíos. No se genera contenido ficticio.
+La experiencia incluye metadatos del track, eventos/notas/frames por canal y visemas vocales cuando Rhubarb produjo cues válidos. Los arrays futuros `lyrics`, `sections` y `haptics` permanecen vacíos. No se genera contenido ficticio.
 
-`timeline` contiene eventos discretos de percusión y comienzos de notas de bass/guitar/piano. Los frames continuos de vocals/other no se duplican allí para controlar el tamaño móvil; Teleo puede leerlos desde sus canales dedicados.
+`timeline` contiene eventos discretos de percusión, comienzos de notas de bass/guitar/piano y cambios de visema. Los frames continuos de vocals/other no se duplican allí para controlar el tamaño móvil; Teleo puede leerlos desde sus canales dedicados.
 
 Los artifacts se almacenan en:
 
@@ -82,7 +82,9 @@ Cada processed artifact contiene un bloque `quality`. Teleo Experience expone es
 
 ## Analysis Lab
 
-`/lab/jobs/<job_uuid>/` carga original, stems y ambos niveles de artifacts. El tiempo proviene exclusivamente de `audio.currentTime`; el Canvas se actualiza con `requestAnimationFrame`. Cada frame visual consulta solo la ventana −5/+10 segundos mediante búsqueda binaria sobre colecciones ordenadas. El control de confianza es visual y nunca reescribe datos.
+`/lab/jobs/<job_uuid>/` carga original, stems y ambos niveles de artifacts. El tiempo proviene exclusivamente de `audio.currentTime`; el Canvas se actualiza con `requestAnimationFrame`. Cada frame visual consulta solo la ventana visible mediante búsqueda binaria sobre colecciones ordenadas. Esa ventana puede ajustarse entre 0.25 y 30 segundos.
+
+La fuente de audio y la visualización permanecen vinculadas: Original muestra todos los canales; drums, bass, guitar, piano y other enfocan su artifact; cualquier variante vocal enfoca los visemas. En vocals, el Lab muestra la timeline A–H/X y el mismo renderer SVG articulatorio del Review Editor. `Space` controla play/pausa, el arrastre sobre espacio vacío desplaza `audio.currentTime` y **Track position** permite recorrer toda la canción. Los controles de etapa, zoom y confianza solo cambian la vista y nunca reescriben datos.
 
 ## Estados y errores
 

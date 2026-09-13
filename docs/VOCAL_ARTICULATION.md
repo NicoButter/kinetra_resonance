@@ -57,7 +57,7 @@ Articulation is dominant. Intensity changes jaw/lip opening only within bounded 
 
 The renderer receives only MouthPose values and converts them into responsive geometry for `mouth-root`, upper/lower lips, mouth interior, upper/lower teeth, tongue, and jaw. F/V physically raises the independent lower lip to the upper-incisor edge. L raises and advances an independent tongue layer. Jaw geometry moves separately from the mouth interior. These distinctions remain available without color and when reduced motion disables morph durations.
 
-The Review Editor displays `Rhubarb code · articulation alias`, neighboring context, and a full debug pose readout. Its developer-only Articulation Lab provides temporary sliders and Copy Pose JSON. Slider values never enter review actions or the database.
+Analysis Lab displays the animated rig and the active `Rhubarb code · articulation alias` while exploring a vocal source. The Review Editor adds neighboring context, the full debug pose readout, editable viseme lanes and its developer-only Articulation Lab. Temporary slider values never enter review actions or the database.
 
 ## Data contract
 

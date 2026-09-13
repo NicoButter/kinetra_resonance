@@ -28,6 +28,8 @@ Audio original
 - Postprocesa eventos musicales sin sobrescribir los datos RAW y valida calidad por canal.
 - Construye `teleo_experience.json` exclusivamente desde artifacts procesados confiables.
 - Muestra progreso con polling, conteos, tamaños y descargas, y conserva historial de trabajos.
+- Ofrece una landing responsive, navegación principal, historial reciente y branding de Kinetra Resonance/Vetrabyte.
+- Incluye un Analysis Lab sincronizado con navegación, zoom, filtros y vista articulatoria para vocals.
 
 ## Inicio rápido
 
@@ -49,7 +51,7 @@ pip install -r requirements-adt.txt
 
 Ese archivo fija ADTOF-pytorch a un commit conocido; la dependencia y sus pesos quedan en el entorno Python, no en Git.
 
-Abrí http://127.0.0.1:8000 y elegí **Process music**. La carga crea un job que se ejecuta en segundo plano. También se puede procesar manualmente:
+Abrí http://127.0.0.1:8000 y elegí **Upload audio**. La carga crea un job que se ejecuta en segundo plano. También se puede procesar manualmente:
 
 ```bash
 python manage.py process_track <job_uuid>
@@ -95,7 +97,7 @@ Kinetra ejecuta sus modelos y herramientas de análisis localmente: no usa APIs 
 | Rhubarb Lip Sync | Propuesta de visemas temporales A–H/X; no letras ni fonemas verificados. | Binario local externo. |
 | ADTOF-pytorch | Propuesta de cinco familias de batería. | Opcional y experimental; hay fallback a onsets `UNASSIGNED`. |
 | Essentia + NumPy + algoritmos Kinetra | BPM, onsets, energía, pitch y postprocesamiento. | Análisis determinista, no IA generativa. |
-| Anime.js + SVG | Visualización articulatoria de los visemas en el Review Editor. | Interfaz local; no participa en el análisis ni en Teleo Android. |
+| Anime.js + SVG | Visualización articulatoria de los visemas en Analysis Lab y Review Editor. | Interfaz local; no participa en el análisis ni en Teleo Android. |
 
 Los pesos se almacenan localmente y no se versionan en Git. El inventario completo —incluyendo entrada/salida, variables, fallbacks, runtimes, licencias y límites— está en [Integraciones, extensiones e IA](docs/INTEGRATIONS_AND_AI.md).
 
@@ -155,6 +157,9 @@ La documentación ampliada está en:
 - [Pipeline de análisis y Teleo Experience](docs/ANALYSIS_PIPELINE.md)
 - [Integraciones, extensiones e IA](docs/INTEGRATIONS_AND_AI.md)
 - [Human Review y Resonance Review Editor](docs/HUMAN_REVIEW.md)
+- [Lip-sync vocal y Rhubarb](docs/vocal-lip-sync.md)
+- [Visualización articulatoria vocal](docs/VOCAL_ARTICULATION.md)
+- [Transcripción automática de batería](docs/DRUM_TRANSCRIPTION.md)
 - [Contexto para ChatGPT](docs/CHATGPT_CONTEXT.md)
 
 ## Alcance actual
@@ -166,11 +171,21 @@ Original audio → 6-stem separation → Per-stem analyzers
                → Structured JSON artifacts → Teleo Experience package
 ```
 
-Los WAV son material intermedio. El producto principal actual es `teleo_experience.json`. La extracción de pitch es conservadora y aproximada; piano todavía usa análisis monofónico, ADTOF solo propone cinco familias gruesas y visemas, letras, secciones y háptica permanecen vacíos, sin información ficticia.
+Los WAV son material intermedio. El producto principal actual es `teleo_experience.json`. La extracción de pitch es conservadora y aproximada; piano todavía usa análisis monofónico y ADTOF solo propone cinco familias gruesas. Los visemas se generan mediante Rhubarb; letras, secciones y háptica permanecen vacíos, sin información ficticia.
 
 ## Analysis Lab
 
 Desde `/lab/` se puede abrir el laboratorio sincronizado de cada job. Utiliza el elemento HTML5 audio como único reloj, Canvas nativo y `requestAnimationFrame`. Permite cambiar entre original/stems, comparar RAW y PROCESSED, filtrar por confianza e inspeccionar eventos y calidad sin modificar los JSON.
+
+La fuente elegida también determina el foco visual: **Original** muestra todos los canales y cada stem muestra su canal correspondiente. Las fuentes vocales muestran los eventos A–H/X en una timeline por carriles y el SVG de boca animado. Cambiar de fuente conserva la posición, el estado play/pausa y la velocidad.
+
+| Control | Acción |
+| --- | --- |
+| `Space` | Play/pausa, salvo cuando el foco está en un control editable. |
+| Arrastre sobre un área vacía del Canvas | Desplaza la reproducción hacia atrás o adelante. |
+| **Track position** | Recorre la canción completa y actualiza `audio.currentTime`. |
+| **Visible time window** | Ajusta el zoom horizontal entre 0.25 y 30 segundos. Menos segundos muestran más detalle. |
+| **Minimum confidence** | Filtra visualmente eventos; no modifica los artifacts. |
 
 ## Human Review Workflow
 
@@ -187,7 +202,7 @@ Al finalizar se generan `reviewed/v<version>/*.json` y `teleo_experience.reviewe
 
 ### Mouth Preview Renderer
 
-El canal VOCALS del Review Editor representa los visemas de Rhubarb mediante `ArticulationMapper`, `MouthPose`, `MouthRenderer` y su implementación local `SvgAnimeMouthRenderer`. La cadena es `Rhubarb visemes → pose articulatoria normalizada → SVG`; usa `audio.currentTime` como único reloj y Anime.js 4.5.0 únicamente para suavizar transiciones visuales. El bundle y su licencia MIT están versionados en `static/vendor/animejs/`, por lo que no hace falta npm ni Internet al clonar el proyecto. Es una herramienta de auditoría de Kinetra Resonance, no el renderer final de Teleo.
+El canal VOCALS de Analysis Lab y Review Editor representa los visemas de Rhubarb mediante `ArticulationMapper`, `MouthPose`, `MouthRenderer` y su implementación local `SvgAnimeMouthRenderer`. La cadena es `Rhubarb visemes → pose articulatoria normalizada → SVG`; usa `audio.currentTime` como único reloj y Anime.js 4.5.0 únicamente para suavizar transiciones visuales. El bundle y su licencia MIT están versionados en `static/vendor/animejs/`, por lo que no hace falta npm ni Internet al clonar el proyecto. En el Lab la vista es exploratoria; en el Review Editor permite auditar y corregir cues. No es el renderer final de Teleo.
 
 La revisión vocal no altera los resultados automáticos de Rhubarb: crea `ReviewAction` sobre el artifact REVIEWED del Job seleccionado. En VOCALS, arrastrar una cue verticalmente la mueve al carril de visema A–H/X correcto (override humano); `Shift` + arrastre horizontal corrige su tiempo conservando duración; `Delete` elimina una detección errónea. También se puede confirmar, redimensionar, dividir o agregar cues. Undo/Redo reconstruye el resultado de forma no destructiva.
 

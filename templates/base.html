@@ -5,13 +5,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>{% block title %}Kinetra Resonance{% endblock %}</title>
+  <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
+  <link rel="apple-touch-icon" href="{% static 'images/favicon.png' %}">
   <link rel="stylesheet" href="{% static 'css/app.css' %}">
   {% block extra_head %}{% endblock %}
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="site-header">
-    <a class="brand brand-lockup" href="{% url 'home' %}" aria-label="Kinetra Resonance home">KINETRA <span>RESONANCE</span></a>
+    <a class="brand brand-lockup" href="{% url 'home' %}" aria-label="Kinetra Resonance home"><img class="navbar-logo" src="{% static 'images/logo-navbar.png' %}" alt="Kinetra Resonance"></a>
     <nav class="site-nav" aria-label="Main navigation">
       <a href="{% url 'home' %}#how-it-works">How it works</a>
       <a href="{% url 'home' %}#recent-tracks">Recent tracks</a>
@@ -25,7 +27,7 @@
   </main>
   <footer class="site-footer">
     <div class="footer-top">
-      <div><a class="brand brand-lockup" href="{% url 'home' %}">KINETRA <span>RESONANCE</span></a><p>Explore the layers behind the music.</p></div>
+      <div><a class="brand brand-lockup" href="{% url 'home' %}" aria-label="Kinetra Resonance home"><img class="footer-logo" src="{% static 'images/logo-navbar.png' %}" alt="Kinetra Resonance"></a><p>Explore the layers behind the music.</p></div>
       <div class="footer-credit"><span>Developed by</span><img src="{% static 'images/vetrabyte-logo.webp' %}" alt="Vetrabyte — Software Development" width="200" height="80" loading="lazy"></div>
     </div>
     <div class="footer-bottom"><p>Process only audio you have the right to use.</p><nav aria-label="Footer navigation"><a href="{% url 'lab' %}">Open lab</a><a href="/admin/">Admin</a></nav></div>

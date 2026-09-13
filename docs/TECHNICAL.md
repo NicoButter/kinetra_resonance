@@ -87,8 +87,8 @@ Todos los analizadores cargan a 44.1 kHz de forma explícita. Bajo, guitarra y p
 | `/tracks/new/` | GET, POST | Carga y creación de job |
 | `/tracks/<uuid>/` | GET | Estado, stems y resultado |
 | `/tracks/<uuid>/delete/` | GET, POST | Confirmación y borrado permanente del agregado del track |
-| `/lab/` | GET | Laboratorio de batería |
-| `/lab/jobs/<job_uuid>/` | GET | Laboratorio RAW/PROCESSED sincronizado con audio |
+| `/lab/` | GET | Índice de análisis procesados disponibles. |
+| `/lab/jobs/<job_uuid>/` | GET | Laboratorio RAW/PROCESSED sincronizado con audio, stems, zoom y preview vocal. |
 | `/review/jobs/<job_uuid>/` | GET | Resonance Review Editor |
 | `/api/jobs/<uuid>/status/` | GET | Polling de job |
 | `/api/tracks/` | GET | Lista de tracks |
@@ -101,6 +101,12 @@ Las APIs usan `JsonResponse`; no hay autenticación ni Django REST Framework en 
 Los endpoints de `/api/reviews/` guardan acciones, reconstruyen REVIEWED, mueven el cursor Undo/Redo, resumen y finalizan. Todas las escrituras requieren la versión actual de la sesión; una versión obsoleta responde `409`.
 
 `POST /api/reviews/<session>/actions/batch/` crea acciones individuales con un `batch_id` común y avanza la versión optimista una vez. El endpoint de datos incluye `drumReview` y `deletedDrums` para contadores/auditoría sin incorporar eliminados al artifact materializado.
+
+## Interfaz web y sincronización
+
+La landing usa templates Django y CSS responsive, sin build frontend. `templates/base.html` concentra el navbar, el footer, el favicon y las marcas; los assets viven en `static/images/`.
+
+Analysis Lab y Review Editor comparten `static/js/lab.js`. HTML Audio mantiene el reloj canónico y Canvas dibuja la ventana visible en cada `requestAnimationFrame`. Elegir un stem enfoca el canal equivalente; las variantes vocales muestran carriles de visema A–H/X y el renderer SVG de boca. El scrubber escribe en `audio.currentTime`, el drag sobre fondo vacío hace pan y el zoom modifica la ventana visible sin alterar artifacts. `Space` alterna play/pausa cuando el foco no pertenece a un control interactivo.
 
 ## Eliminación de tracks
 
@@ -125,11 +131,11 @@ python manage.py check
 python manage.py test
 ```
 
-Los tests cubren modelos/rutas de almacenamiento, validación de carga, creación de job, endpoint de estado, API de stems y normalización del analizador. No ejecutan una separación real.
+Los tests cubren modelos y rutas de almacenamiento, validación de carga, creación y eliminación de jobs/tracks, APIs, postprocesamiento, revisión humana, lip-sync y mapeo articulatorio. Las pruebas unitarias no ejecutan una separación real; los backends pesados se reemplazan por dobles controlados.
 
 ## Evolución prevista
 
-1. Clasificación de eventos de batería: kick, snare, hi-hat y cymbal.
+1. Evaluar las propuestas de batería contra el dataset de correcciones humanas exportable.
 2. Revisar sample rate, duración y metadatos de audio de forma uniforme.
 3. Incorporar cola de jobs persistente (Celery/RQ) si se requieren concurrencia y reintentos.
-4. Añadir análisis de otros instrumentos, API autenticada para Teleo y despliegue de producción.
+4. Añadir transcripción polifónica, API autenticada para Teleo y despliegue de producción.
