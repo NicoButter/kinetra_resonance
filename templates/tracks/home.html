@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% load static %}
 {% block extra_head %}<meta name="description" content="Separate music into individual parts, explore its rhythm and voice, and review structured analysis with Kinetra Resonance.">{% endblock %}
 {% block content %}
 <div class="landing">
@@ -10,26 +11,40 @@
       <div class="hero-actions"><a class="button" href="{% url 'track-create' %}">Upload audio <span aria-hidden="true">↗</span></a><a class="button secondary" href="#how-it-works">See how it works <span aria-hidden="true">↓</span></a></div>
       <p class="hero-note">Start with an audio file. Review the results at your own pace.</p>
     </div>
-    <div class="layer-preview" role="img" aria-label="Illustration of one audio track separated into vocals, drums, bass and other instruments." data-reveal>
-      <div class="preview-heading"><span>ONE AUDIO FILE</span><span class="preview-tag">Illustration</span></div>
-      <div class="waveform" aria-hidden="true">{% for bar in '123456789012345678901234567890123456' %}<i></i>{% endfor %}</div>
-      <div class="preview-divider">Separate into individual parts <span aria-hidden="true">↓</span></div>
-      <div class="layer-row vocals"><span>Vocals</span><div class="layer-line"></div></div>
-      <div class="layer-row drums"><span>Drums</span><div class="layer-line"></div></div>
-      <div class="layer-row bass"><span>Bass</span><div class="layer-line"></div></div>
-      <div class="layer-row instruments"><span>Instruments</span><div class="layer-line"></div></div>
-      <p class="preview-caption">Listen separately. Understand together.</p>
+    <figure class="hero-image-frame" data-reveal>
+      <img src="{% static 'images/hero-section-image.webp' %}" alt="Person exploring separated audio layers and visual music analysis through a haptic interface." fetchpriority="high">
+    </figure>
+  </section>
+
+  <section class="landing-section landing-image-section" aria-labelledby="experience-title" data-reveal>
+    <div class="landing-section-heading">
+      <div><p class="eyebrow">A more immersive way to listen</p><h2 id="experience-title">Feel the music beyond the waveform.</h2></div>
+      <p>Turn separated audio into a richer visual and haptic experience with the Teleo integration.</p>
+    </div>
+    <div class="landing-image-pair">
+      <figure class="landing-image-frame landing-hero-image">
+        <img src="{% static 'images/hero-section-2.webp' %}" alt="Abstract visualization of one audio track separated into stems and structured data." loading="lazy">
+      </figure>
+      <figure class="landing-image-frame landing-hero-image">
+        <img src="{% static 'images/hero-section.webp' %}" alt="Person experiencing music through a haptic interface with Kinetra Resonance and Teleo." loading="lazy">
+      </figure>
     </div>
   </section>
 
   <section id="how-it-works" class="landing-section" aria-labelledby="workflow-title" data-reveal>
     <p class="eyebrow">From audio to insight</p>
     <div class="landing-section-heading"><h2 id="workflow-title">A clear path through your music.</h2><p>Upload, separate, then explore. Each step brings you closer to the details.</p></div>
+    <figure class="landing-image-frame process-image">
+      <img src="{% static 'images/como-funciona-imagen.webp' %}" alt="Diagram showing the journey from sound and analysis to structured data and moving images." loading="lazy">
+    </figure>
     <ol class="workflow-grid">
       <li data-reveal><span class="step-number">01 / UPLOAD</span><h3>Start with your track</h3><p>Add an audio file, give it a name and choose a processing profile.</p></li>
       <li data-reveal><span class="step-number">02 / SEPARATE</span><h3>Discover its layers</h3><p>Processing separates the audio into individual parts, called stems, such as vocals, drums and bass.</p></li>
       <li data-reveal><span class="step-number">03 / EXPLORE</span><h3>Listen, inspect, refine</h3><p>Open the results to listen to each part, explore the analysis and review detected events.</p></li>
     </ol>
+    <figure class="landing-image-frame process-image process-image-secondary">
+      <img src="{% static 'images/como-funciona-imagen-2.webp' %}" alt="Visualization of separated stems, timeline analysis and Teleo haptic output." loading="lazy">
+    </figure>
   </section>
 
   <section id="recent-tracks" class="landing-section" aria-labelledby="recent-title" data-reveal>

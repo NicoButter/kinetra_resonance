@@ -5,9 +5,9 @@
 Kinetra Resonance converts music into structured temporal data for visual and tactile experiences. The system prepares `teleo_experience*.json` packages for integration with PK Teleo. Stem separation is an intermediate processing step, not the final product.
 
 <p align="center">
-  <img src="static/images/logo-navbar.png" alt="Kinetra Resonance" width="300">
+  <img src="static/images/logo-navbar.webp" alt="Kinetra Resonance" width="300">
   &nbsp;&nbsp;&nbsp;
-  <img src="static/images/logo-teleo.png" alt="PK Teleo" width="260">
+  <img src="static/images/logo-teleo.webp" alt="PK Teleo" width="260">
   &nbsp;&nbsp;&nbsp;
   <img src="static/images/vetrabyte-logo.webp" alt="Vetrabyte Software Development" width="300">
 </p>
