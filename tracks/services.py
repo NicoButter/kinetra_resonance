@@ -1,4 +1,5 @@
 import logging
+import hashlib
 import shutil
 import subprocess
 import sys
@@ -9,6 +10,19 @@ from django.db import DatabaseError, transaction
 
 
 logger = logging.getLogger(__name__)
+
+
+def compute_source_sha256(track) -> str:
+    """Calculate the original audio hash once; later exports reuse the persisted value."""
+    if len(track.source_sha256 or '') == 64:
+        return track.source_sha256
+    digest = hashlib.sha256()
+    with track.source_file.open('rb') as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b''):
+            digest.update(chunk)
+    track.source_sha256 = digest.hexdigest()
+    track.save(update_fields=['source_sha256', 'updated_at'])
+    return track.source_sha256
 
 
 class TrackDeletionError(RuntimeError):
@@ -61,6 +75,7 @@ class TrackDeletionService:
             'processingJobs': track.processing_jobs.count(),
             'stems': track.stems.count(),
             'analysisArtifacts': track.analysis_artifacts.count(),
+            'teleoPublications': track.teleo_publications.count(),
             'reviewSessions': ReviewSession.objects.filter(processing_job__track_id=track_id).count(),
             'reviewActions': ReviewAction.objects.filter(review_session__processing_job__track_id=track_id).count(),
         }

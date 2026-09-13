@@ -17,6 +17,7 @@ from processing.models import ProcessingJob, ProcessingProfile
 from processing.services import StemSeparationService
 from processing.vocal_isolation import VocalIsolationError, VocalIsolationService
 from tracks.models import Stem
+from tracks.services import compute_source_sha256
 
 
 logger = logging.getLogger(__name__)
@@ -67,6 +68,10 @@ class Command(BaseCommand):
             job.error_message = ''
             job.metadata = {}
             job.save()
+
+            # Hashing happens in the background processing command for new jobs.
+            # Publication keeps a lazy fallback for pre-migration jobs.
+            compute_source_sha256(track)
 
             separator.clear_previous_outputs(track, job)
             job.status = ProcessingJob.Status.SEPARATING

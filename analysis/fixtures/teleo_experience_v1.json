@@ -1,0 +1,17 @@
+{
+  "format": "teleo-music",
+  "version": 1,
+  "analysis": {"engine": "kinetra-resonance", "analysisVersion": 1},
+  "track": {"id": "fixture-track", "title": "Synthetic Pulse", "artist": "Kinetra Fixture", "durationMs": 1000, "bpm": 120},
+  "channelsQuality": {},
+  "drums": {"events": [{"id": "drums-000001", "timeMs": 100, "durationMs": 80, "type": "kick", "intensity": 0.8}]},
+  "bass": {"notes": [{"startMs": 200, "endMs": 500, "midi": 40, "note": "E2", "intensity": 0.6}]},
+  "guitar": {"notes": []},
+  "piano": {"notes": []},
+  "vocals": {"frames": [{"timeMs": 0, "presence": 0.4}], "visemes": [{"startMs": 400, "endMs": 520, "shape": "G", "intensity": 0.72}]},
+  "other": {"frames": []},
+  "timeline": [{"timeMs": 100, "channel": "drums", "type": "kick", "intensity": 0.8}],
+  "lyrics": [],
+  "sections": [],
+  "haptics": [{"timeMs": 100, "durationMs": 80, "intensity": 0.8}]
+}

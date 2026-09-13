@@ -20,6 +20,7 @@ class Track(models.Model):
     artist = models.CharField(max_length=255, blank=True)
     original_filename = models.CharField(max_length=255)
     source_file = models.FileField(upload_to=track_source_path)
+    source_sha256 = models.CharField(max_length=64, blank=True, editable=False)
     duration_ms = models.PositiveIntegerField(null=True, blank=True)
     file_size = models.PositiveBigIntegerField(validators=[MinValueValidator(0)])
     created_at = models.DateTimeField(auto_now_add=True)

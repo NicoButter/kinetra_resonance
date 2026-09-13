@@ -4,7 +4,7 @@ Copiá este documento al iniciar una conversación nueva sobre el proyecto. Desc
 
 ---
 
-Estamos construyendo **Kinetra Resonance**, una herramienta local y open source para separar música en stems, analizar audio y producir datos estructurados para aplicaciones visuales y hápticas, con paquetes preparados para integrarse con PK Teleo Música.
+Estamos construyendo **Kinetra Resonance**, un compilador/editor local y open source que separa música, analiza audio y publica bundles Teleo Music Protocol v1 autohospedables para experiencias visuales y hápticas.
 
 ## Objetivo del producto
 
@@ -14,8 +14,10 @@ El flujo actual es:
 Audio proporcionado por el usuario
   → separación de stems
   → análisis musical
-  → timeline JSON estructurado
-  → futuras aplicaciones visuales / hápticas
+  → revisión
+  → experiencia canónica
+  → bundle estático self-hosted
+  → Teleo u otro runtime compatible
 ```
 
 No descarga música, no acepta URLs, no elude DRM y no realiza ripping de plataformas. La persona usuaria debe tener derecho a procesar el audio cargado.
@@ -40,6 +42,9 @@ El repositorio contiene un MVP Django local funcional con:
 - editor multilanes de batería con `ASSIGN_DRUM_PIECE`, batches, audition y Rapid Drum Review;
 - artifacts JSON asociados obligatoriamente al ProcessingJob productor;
 - `TeleoExperienceBuilder` que valida los seis artifacts y genera `teleo_experience.json`;
+- `TeleoPublicationValidator`, `TeleoCatalogBuilder` y `LocalBundlePublisher` que exportan `var/teleo_publish/` sin red;
+- `TeleoPublication` para trazabilidad, `experienceVersion`, calidad, source hash y checksums;
+- comandos `export_teleo_track`, `build_teleo_catalog` y `export_teleo_library`;
 - polling de estado en `/api/jobs/<uuid>/status/`;
 - APIs JSON internas de tracks, stems y artifacts;
 - página `/lab/` con análisis finalizados y laboratorio por job sincronizado con audio;
@@ -113,8 +118,8 @@ Los timestamps están en milisegundos e `intensity` siempre pertenece a `[0.0, 1
 - Conservar tests sin separación real: mockear el separador.
 - Antes de terminar cambios, ejecutar `python manage.py makemigrations --check`, `migrate`, `check` y `test`.
 
-## Próximo hito
+## Arquitectura de publicación
 
-Usar el dataset automatic-vs-human exportable para evaluar ADTOF y preparar un futuro backend/modelo propio, sin entrenar automáticamente ni implementar todavía la representación visual/háptica de Teleo.
+Kinetra genera el protocolo y no necesita que Teleo esté instalado. El destino oficial es `Audio → Kinetra Resonance → Teleo Music Protocol → servidor self-hosted → Teleo`. El operador sube el contenido de `TELEO_EXPORT_DIR` al hosting estático compatible que elija; por defecto es `<PROJECT_ROOT>/var/teleo_publish/`. No existe servidor central, dominio Vetrabyte, Firebase, cuenta cloud ni transporte remoto obligatorio.
 
-El destino arquitectónico es: audio original → seis stems → analizadores por stem → JSON estructurados (`metadata`, instrumentos, timeline, visemas, haptics) → paquete de experiencia Teleo. Los WAV son material intermedio, no el producto final principal.
+Los WAV y artifacts RAW/PROCESSED/REVIEWED son internos. El contrato público contiene sólo `catalog.json` y `tracks/<uuid>/experience.json`; usa URLs relativas, timestamps enteros en ms, review resuelto, calidad de procedencia y SHA-256 del audio fuente.

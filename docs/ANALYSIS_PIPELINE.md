@@ -21,7 +21,13 @@ QualityValidator
       ↓
 TeleoExperienceBuilder
       ↓
-teleo_experience.json
+teleo_experience.json (canonical artifact)
+      ↓
+TeleoPublicationValidator
+      ↓
+LocalBundlePublisher
+      ↓
+catalog.json + tracks/<uuid>/experience.json
 ```
 
 La rama de batería dentro de ese flujo es:
@@ -75,6 +81,10 @@ media/tracks/<track_uuid>/analysis/<job_uuid>/
 ```
 
 Esto conserva resultados históricos y evita contaminación entre reprocesamientos.
+
+El builder continúa siendo la única fuente canónica y nunca vuelve a analizar audio durante un export. La publicación selecciona el artifact FINAL del mismo job, prefiriendo `TELEO_REVIEWED` únicamente cuando su `ReviewSession` está completada. Resuelve valores efectivos, agrega versionado de experiencia y `sourceHash`, valida el protocolo y escribe el bundle mediante reemplazo atómico.
+
+Los artifacts internos permanecen bajo `MEDIA_ROOT`; la salida pública vive por defecto en `var/teleo_publish/` y contiene solamente `catalog.json` y `tracks/<uuid>/experience.json`. No incluye audio, stems, RAW/PROCESSED/REVIEWED, diagnósticos ni rutas locales.
 
 Cada processed artifact contiene un bloque `quality`. Teleo Experience expone esos bloques en `channelsQuality`; los eventos de canales `unreliable` no entran en las colecciones de render ni en la timeline.
 

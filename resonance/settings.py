@@ -140,6 +140,11 @@ STATICFILES_DIRS = [BASE_DIR / 'static']
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+_teleo_export_dir = Path(os.environ.get('TELEO_EXPORT_DIR') or os.environ.get('TELEO_PUBLISH_ROOT') or BASE_DIR / 'var' / 'teleo_publish')
+TELEO_EXPORT_DIR = _teleo_export_dir if _teleo_export_dir.is_absolute() else BASE_DIR / _teleo_export_dir
+# Backwards-compatible alias for older local environments.
+TELEO_PUBLISH_ROOT = TELEO_EXPORT_DIR
+PUBLISH_LYRICS = os.environ.get('PUBLISH_LYRICS', 'false').lower() in {'1', 'true', 'yes'}
 TELEO_SEPARATOR_MODEL = os.environ.get('TELEO_SEPARATOR_MODEL', 'htdemucs_6s.yaml')
 VOCAL_SEPARATOR_MODEL = os.environ.get('VOCAL_SEPARATOR_MODEL', 'UVR-MDX-NET-Inst_HQ_4.onnx')
 # Backwards-compatible alias for integrations that still read the old setting.

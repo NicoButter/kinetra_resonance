@@ -37,6 +37,31 @@ class ExperienceLevel(models.TextChoices):
     TELEO_MASTER = 'TELEO_MASTER', 'Teleo master'
 
 
+class TeleoPublication(models.Model):
+    """Trace one locally exported Teleo protocol revision back to its canonical artifact."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    track = models.ForeignKey('tracks.Track', related_name='teleo_publications', on_delete=models.CASCADE)
+    processing_job = models.ForeignKey('processing.ProcessingJob', related_name='teleo_publications', on_delete=models.CASCADE)
+    source_artifact = models.ForeignKey(AnalysisArtifact, related_name='teleo_publications', on_delete=models.CASCADE)
+    experience_version = models.PositiveIntegerField(validators=[MinValueValidator(1)])
+    schema_version = models.PositiveIntegerField(default=1, validators=[MinValueValidator(1)])
+    quality = models.CharField(max_length=20, choices=ExperienceLevel.choices, default=ExperienceLevel.AUTOMATIC)
+    lyrics_included = models.BooleanField(default=False)
+    source_hash = models.CharField(max_length=64)
+    canonical_checksum = models.CharField(max_length=64)
+    experience_checksum = models.CharField(max_length=64)
+    destination_root = models.CharField(max_length=1024)
+    created_at = models.DateTimeField(auto_now_add=True)
+    exported_at = models.DateTimeField()
+
+    class Meta:
+        ordering = ['-experience_version']
+        constraints = [
+            models.UniqueConstraint(fields=['track', 'experience_version'], name='unique_track_experience_version'),
+        ]
+
+
 class DrumPieceType(models.TextChoices):
     UNASSIGNED = 'unassigned', 'Unassigned'
     KICK = 'kick', 'Kick'

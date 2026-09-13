@@ -1,3 +1,4 @@
+import json
 from unittest.mock import patch
 from pathlib import Path
 from django.core.files.base import ContentFile
@@ -63,6 +64,31 @@ class TrackTests(TestCase):
         for label in ('Drums', 'Bass', 'Guitar', 'Piano', 'Vocals', 'Other', 'TELEO EXPERIENCE'):
             self.assertContains(response, label)
         self.assertContains(response, reverse('job-lab', args=[job.id]))
+
+    @override_settings(TELEO_EXPORT_DIR=TEST_MEDIA / 'teleo_publish', TELEO_PUBLISH_ROOT=TEST_MEDIA / 'teleo_publish', PUBLISH_LYRICS=False)
+    def test_track_page_exports_canonical_experience_through_publication_service(self):
+        track = self.make_track()
+        track.duration_ms = 1000
+        track.save(update_fields=['duration_ms'])
+        job = ProcessingJob.objects.create(track=track, status=ProcessingJob.Status.COMPLETED)
+        payload = {
+            'format': 'teleo-music', 'version': 1,
+            'track': {'id': str(track.id), 'title': track.title, 'artist': '', 'durationMs': 1000},
+            'drums': {'events': []}, 'bass': {'notes': []}, 'guitar': {'notes': []},
+            'piano': {'notes': []}, 'vocals': {'frames': [], 'visemes': []},
+            'other': {'frames': []}, 'timeline': [], 'lyrics': [], 'sections': [], 'haptics': [],
+        }
+        artifact = AnalysisArtifact(track=track, processing_job=job, type=AnalysisArtifact.Type.TELEO_EXPERIENCE, stage=AnalysisArtifact.Stage.FINAL)
+        artifact.json_file.save('teleo_experience.json', ContentFile(json.dumps(payload).encode()), save=True)
+
+        page = self.client.get(reverse('track-detail', args=[track.id]))
+        self.assertContains(page, 'TELEO EXPORT')
+        self.assertContains(page, 'Exportar para Teleo')
+        response = self.client.post(reverse('export-teleo-track', args=[track.id, job.id]))
+
+        self.assertRedirects(response, reverse('track-detail', args=[track.id]))
+        self.assertTrue((TEST_MEDIA / 'teleo_publish' / 'catalog.json').is_file())
+        self.assertTrue((TEST_MEDIA / 'teleo_publish' / 'tracks' / str(track.id) / 'experience.json').is_file())
     def test_job_lab_uses_single_audio_clock_and_canvas(self):
         track = self.make_track(); job = ProcessingJob.objects.create(track=track)
         response = self.client.get(reverse('job-lab', args=[job.id]))

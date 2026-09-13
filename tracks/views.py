@@ -13,6 +13,7 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 
 from analysis.models import AnalysisArtifact, ReviewSession
 from analysis.lip_sync import RhubarbHealthCheck
+from analysis.publication import LocalBundlePublisher, TeleoPublicationError
 from analysis.review import ReviewEngine, ReviewValidationError
 from processing.models import ProcessingJob
 from processing.services import StemSeparationService
@@ -112,7 +113,55 @@ def track_detail(request, track_id):
         vocal_lip_sync = RhubarbHealthCheck().check()
         vocal_lip_sync['status'] = 'available' if vocal_lip_sync['available'] else 'unavailable'
         vocal_lip_sync['backendVersion'] = vocal_lip_sync.get('version')
-    return render(request, 'tracks/track_detail.html', {'track': track, 'job': job, 'artifact_rows': artifact_rows, 'experience': experience, 'reviewed_experience': reviewed_experience, 'drum_transcription': drum_transcription, 'vocal_lip_sync': vocal_lip_sync, 'vocal_isolation': vocal_isolation, 'vocal_comparison': vocal_comparison, 'reprocess_form': ReprocessTrackForm(), 'can_delete': can_delete})
+    publication = job.teleo_publications.first() if job else None
+    publication_ready = bool(job and (reviewed_experience or (experience and experience.get('status') == 'Ready')))
+    export_root = Path(publication.destination_root) if publication else Path(settings.TELEO_EXPORT_DIR)
+    directory_error = ''
+    try:
+        export_root.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        directory_error = str(exc)
+    catalog_path = export_root / 'catalog.json'
+    experience_path = export_root / 'tracks' / str(track.id) / 'experience.json'
+    publication_panel = {
+        'ready': publication_ready,
+        'status': 'EXPORTED' if publication else 'READY' if publication_ready else 'INVALID',
+        'quality': publication.quality if publication else 'HUMAN_REVIEWED' if reviewed_experience else 'AUTOMATIC',
+        'experience_version': publication.experience_version if publication else None,
+        'source_hash': publication.source_hash if publication else track.source_sha256,
+        'lyrics_included': publication.lyrics_included if publication else settings.PUBLISH_LYRICS,
+        'destination': str(export_root),
+        'last_exported_at': publication.exported_at if publication else None,
+        'catalog_path': str(catalog_path),
+        'experience_path': str(experience_path),
+        'catalog_relative_path': 'catalog.json',
+        'experience_relative_path': f'tracks/{track.id}/experience.json',
+        'directory_exists': export_root.is_dir(),
+        'catalog_exists': catalog_path.is_file(),
+        'experience_exists': experience_path.is_file(),
+        'directory_error': directory_error,
+    }
+    return render(request, 'tracks/track_detail.html', {'track': track, 'job': job, 'artifact_rows': artifact_rows, 'experience': experience, 'reviewed_experience': reviewed_experience, 'drum_transcription': drum_transcription, 'vocal_lip_sync': vocal_lip_sync, 'vocal_isolation': vocal_isolation, 'vocal_comparison': vocal_comparison, 'reprocess_form': ReprocessTrackForm(), 'can_delete': can_delete, 'publication': publication_panel})
+
+
+@require_POST
+def export_teleo_track(request, track_id, job_id):
+    job = get_object_or_404(ProcessingJob.objects.select_related('track'), id=job_id, track_id=track_id)
+    try:
+        result = LocalBundlePublisher().export_job(
+            job,
+            include_lyrics=request.POST.get('include_lyrics') == 'on',
+        )
+    except TeleoPublicationError as exc:
+        messages.error(request, f'Teleo export failed: {exc}')
+    else:
+        revision = 'new revision' if result.created_revision else 'same revision'
+        messages.success(
+            request,
+            f'Exportacion completada ({revision}, experience v{result.publication.experience_version}). '
+            f'Suba el contenido de {result.root} a la raiz de su servidor compatible con Teleo.',
+        )
+    return redirect('track-detail', track_id=track_id)
 
 
 @require_POST

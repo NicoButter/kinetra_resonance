@@ -64,10 +64,55 @@
   <div class="cards">{% for row in artifact_rows %}<div class="card"><strong>{{ row.label }}</strong><span>{{ row.status }}</span>{% if row.artifact %}<small>{{ row.count }} {{ row.unit }} · {{ row.file_size }} bytes</small><a href="{{ row.artifact.json_file.url }}" download>Download JSON</a>{% else %}<small>Waiting for analyzer</small>{% endif %}</div>{% endfor %}</div>
 </section>
 <section class="panel teleo-experience">
-  <p class="eyebrow">Final product</p><h2>TELEO EXPERIENCE</h2>
+  <p class="eyebrow">Canonical compiler output</p><h2>BUILD TELEO EXPERIENCE</h2><p class="muted">Built automatically from the validated artifacts of this ProcessingJob. Export uses this canonical result without rerunning analysis.</p>
   {% if reviewed_experience %}<div class="card"><strong>Human-reviewed · review v{{ reviewed_experience.version }}</strong><span>{{ reviewed_experience.reviewed_at }}</span><small>{{ reviewed_experience.file_size }} bytes · preferred Teleo source</small><a class="button" href="{{ reviewed_experience.artifact.json_file.url }}" download>Download teleo_experience.reviewed.json</a></div>{% endif %}
   {% if experience %}<div class="cards"><div class="card"><strong>{{ experience.status }} · schema v{{ experience.version }}</strong><span>{{ experience.duration_ms }} ms · {{ experience.total_events }} timeline events</span><small>{{ experience.file_size }} bytes</small></div></div><p><a class="button" href="{{ experience.artifact.json_file.url }}" download>Download teleo_experience.json</a></p>{% else %}<p class="muted">The experience will be available only after all six analyzers complete successfully.</p>{% endif %}
 </section>
+{% if job %}
+<section class="panel teleo-publication">
+  <p class="eyebrow">TELEO EXPORT</p>
+  <h2>Exportar para Teleo</h2>
+  <div class="export-directory">
+    <small>Directorio de salida</small>
+    <code>{{ publication.destination }}</code>
+    <details>
+      <summary class="button secondary">Cambiar directorio</summary>
+      <p class="muted">Defini <code>TELEO_EXPORT_DIR</code> en el entorno o en <code>.env</code>. Si no existe, Kinetra usa <code>var/teleo_publish/</code>.</p>
+    </details>
+    {% if publication.directory_error %}<p class="notice error">No se pudo crear el directorio: {{ publication.directory_error }}</p>{% endif %}
+  </div>
+  <div class="publication-facts">
+    <div><small>Protocolo</small><strong>Teleo Music v1</strong></div>
+    <div><small>Cancion</small><strong>{{ track.title }}</strong></div>
+    <div><small>Version experience</small><strong>{% if publication.experience_version %}{{ publication.experience_version }}{% else %}Se asigna al exportar{% endif %}</strong></div>
+    <div><small>Calidad</small><strong>{{ publication.quality }}</strong></div>
+    <div><small>Audio incluido</small><strong>No</strong></div>
+    <div><small>Lyrics incluidas</small><strong>{{ publication.lyrics_included|yesno:'Si,No' }}</strong></div>
+    <div><small>Source hash</small><strong class="hash-value">{{ publication.source_hash|default:'Disponible al exportar' }}</strong></div>
+    <div><small>Estado</small><strong>{{ publication.status }}</strong></div>
+  </div>
+  <div class="export-status">
+    <strong>Estado</strong>
+    <span class="{% if publication.ready %}ok{% else %}bad{% endif %}">{% if publication.ready %}✓ Experience valida{% else %}Experience pendiente{% endif %}</span>
+    <span class="{% if publication.source_hash %}ok{% else %}pending{% endif %}">{% if publication.source_hash %}✓ Source hash disponible{% else %}Source hash se calculara al exportar{% endif %}</span>
+    <span class="{% if publication.ready %}ok{% else %}bad{% endif %}">{% if publication.ready %}✓ Lista para Teleo{% else %}Falta una experience canonica valida{% endif %}</span>
+  </div>
+  {% if publication.status == 'EXPORTED' %}
+    <div class="export-result"><strong>Exportacion completada.</strong><p>Directorio:<br><code>{{ publication.destination }}</code></p><p>Suba el contenido de este directorio a la raiz de su servidor compatible con Teleo.</p></div>
+    <div class="export-files"><strong>Ultima exportacion</strong><span>{{ publication.last_exported_at|date:'d/m/Y H:i' }}</span><strong>Archivos</strong><code>{{ publication.catalog_relative_path }}</code><code>{{ publication.experience_relative_path }}</code><a class="button secondary" href="file://{{ publication.destination }}">Abrir directorio</a></div>
+  {% endif %}
+  {% if publication.ready %}
+    <form action="{% url 'export-teleo-track' track.id job.id %}" method="post" class="teleo-export-form">
+      {% csrf_token %}
+      <label><input type="checkbox" name="include_lyrics"{% if publication.lyrics_included %} checked{% endif %}> Incluir lyrics canonicas en este export</label>
+      <small class="muted">Las lyrics quedan excluidas por defecto. Activalas solo cuando tengas permiso para distribuirlas.</small>
+      <button class="button" type="submit">Exportar para Teleo</button>
+    </form>
+  {% else %}
+    <p class="notice error">A valid canonical Teleo Experience for this ProcessingJob is required before export.</p>
+  {% endif %}
+</section>
+{% endif %}
 <section class="panel narrow">
   <h2>Reprocess</h2><p class="muted">Uses the existing original audio and replaces current stems and artifacts. Job history is preserved.</p>
   <form action="{% url 'track-reprocess' track.id %}" method="post">{% csrf_token %}{% for field in reprocess_form %}{% if field.name == 'vocal_refinement_enabled' %}<details><summary>Advanced / debug</summary><p><label>{{ field }} {{ field.label }}</label>{% if field.help_text %}<small class="muted">{{ field.help_text }}</small>{% endif %}</p></details>{% else %}<p><label>{{ field.label }}</label>{{ field }}{% if field.help_text %}<small class="muted">{{ field.help_text }}</small>{% endif %}</p>{% endif %}{% endfor %}<button class="button" type="submit">Reprocess</button></form>

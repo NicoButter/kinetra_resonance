@@ -22,6 +22,8 @@ output/
 models/
 var/models/audio-separator/
 var/models/audio-separator/**/*.tmp
+var/teleo_publish/
+exports/teleo/
 *.wav
 *.mp3
 *.flac
