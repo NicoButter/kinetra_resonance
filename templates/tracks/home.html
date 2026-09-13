@@ -1,1 +1,45 @@
-{% extends 'base.html' %}{% block content %}<section class="hero"><p class="eyebrow">Music Separation & Analysis Engine</p><h1>Transforming music into structured visual and tactile information.</h1><a class="button" href="{% url 'track-create' %}">Process music</a></section><section><div class="section-title"><h2>Recent tracks</h2><a href="{% url 'lab' %}">Open lab →</a></div>{% if tracks %}<div class="cards">{% for track in tracks %}<a class="card" href="{% url 'track-detail' track.id %}"><strong>{{ track.title }}</strong><span>{{ track.artist|default:'Unknown artist' }}</span><small>{{ track.current_job.get_status_display|default:'No job' }} · {{ track.stems.count }} stem{{ track.stems.count|pluralize }} · {{ track.created_at|date:'M j, Y' }}</small></a>{% endfor %}</div>{% else %}<p class="muted">No tracks yet. Upload audio to begin.</p>{% endif %}</section>{% endblock %}
+{% extends 'base.html' %}
+{% block extra_head %}<meta name="description" content="Separate music into individual parts, explore its rhythm and voice, and review structured analysis with Kinetra Resonance.">{% endblock %}
+{% block content %}
+<div class="landing">
+  <section class="landing-hero" aria-labelledby="hero-title">
+    <div>
+      <p class="eyebrow">Music separation & analysis</p>
+      <h1 id="hero-title">One track.<br><span>Every layer.</span></h1>
+      <p class="hero-description">Separate voices and instruments. Explore the rhythm, notes and vocal movements behind your music.</p>
+      <div class="hero-actions"><a class="button" href="{% url 'track-create' %}">Upload audio <span aria-hidden="true">↗</span></a><a class="button secondary" href="#how-it-works">See how it works <span aria-hidden="true">↓</span></a></div>
+      <p class="hero-note">Start with an audio file. Review the results at your own pace.</p>
+    </div>
+    <div class="layer-preview" role="img" aria-label="Illustration of one audio track separated into vocals, drums, bass and other instruments.">
+      <div class="preview-heading"><span>ONE AUDIO FILE</span><span class="preview-tag">Illustration</span></div>
+      <div class="waveform" aria-hidden="true">{% for bar in '123456789012345678901234567890123456' %}<i></i>{% endfor %}</div>
+      <div class="preview-divider">Separate into individual parts <span aria-hidden="true">↓</span></div>
+      <div class="layer-row vocals"><span>Vocals</span><div class="layer-line"></div></div>
+      <div class="layer-row drums"><span>Drums</span><div class="layer-line"></div></div>
+      <div class="layer-row bass"><span>Bass</span><div class="layer-line"></div></div>
+      <div class="layer-row instruments"><span>Instruments</span><div class="layer-line"></div></div>
+      <p class="preview-caption">Listen separately. Understand together.</p>
+    </div>
+  </section>
+
+  <section id="how-it-works" class="landing-section" aria-labelledby="workflow-title">
+    <p class="eyebrow">From audio to insight</p>
+    <div class="landing-section-heading"><h2 id="workflow-title">A clear path through your music.</h2><p>Upload, separate, then explore. Each step brings you closer to the details.</p></div>
+    <ol class="workflow-grid">
+      <li><span class="step-number">01 / UPLOAD</span><h3>Start with your track</h3><p>Add an audio file, give it a name and choose a processing profile.</p></li>
+      <li><span class="step-number">02 / SEPARATE</span><h3>Discover its layers</h3><p>Processing separates the audio into individual parts, called stems, such as vocals, drums and bass.</p></li>
+      <li><span class="step-number">03 / EXPLORE</span><h3>Listen, inspect, refine</h3><p>Open the results to listen to each part, explore the analysis and review detected events.</p></li>
+    </ol>
+  </section>
+
+  <section id="recent-tracks" class="landing-section" aria-labelledby="recent-title">
+    <p class="eyebrow">Your workspace</p>
+    <div class="landing-section-heading"><div><h2 id="recent-title">Pick up where you left off.</h2><p>Your latest uploads and processing results, all in one place.</p></div><a class="text-link" href="{% url 'lab' %}">Explore the lab <span aria-hidden="true">↗</span></a></div>
+    {% if tracks %}
+    <div class="cards">{% for track in tracks %}<a class="card track-card" href="{% url 'track-detail' track.id %}"><strong>{{ track.title }}</strong><span>{{ track.artist|default:'Unknown artist' }}</span><small>{{ track.current_job.get_status_display|default:'No job' }} · {{ track.stems.count }} stem{{ track.stems.count|pluralize }}</small><div class="track-card-bottom"><small>{{ track.created_at|date:'M j, Y' }}</small><span>View track <span aria-hidden="true">↗</span></span></div></a>{% endfor %}</div>
+    {% else %}
+    <div class="empty-workspace"><div><h3>Your first track starts here.</h3><p>Once you upload audio, you can follow its progress and return here to open the results.</p></div><a class="button" href="{% url 'track-create' %}">Upload audio <span aria-hidden="true">↗</span></a></div>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

@@ -28,6 +28,7 @@
   const indices = {raw: {}, processed: {}, reviewed: {}};
   let deletedDrums = [];
   let stage = document.querySelector('input[name="artifact-stage"]:checked')?.value || 'processed';
+  let visualChannel = null;
   let minimumConfidence = 0;
   let drawCache = [];
   let selectedId = null;
@@ -42,6 +43,7 @@
   let zoomMs = Number(timelineZoomInput?.value || 15) * 1000;
   let renderWindow = {startMs: 0, endMs: 15000, plotLeft: 118, plotWidth: 900};
   let pointerState = null;
+  let suppressTimelineClick = false;
   let marquee = null;
   let auditionState = null;
   let scrubbing = false;
@@ -66,7 +68,11 @@
   const formatTime = seconds => { const value = Math.max(0, Number(seconds) || 0); const minutes = Math.floor(value / 60); const rest = value - minutes * 60; return `${String(minutes).padStart(2, '0')}:${rest.toFixed(3).padStart(6, '0')}`; };
   const checked = id => Boolean(document.querySelector(id)?.checked);
   const isDrumLaneMode = () => editor && selectedChannel === 'drums';
-  const isVisemeLaneMode = () => editor && selectedChannel === 'vocals' && (data[stage].vocals?.visemes?.length || 0) > 0;
+  const effectiveVisemeShape = cue => {
+    const shape = mouthHelpers?.effectiveShape(cue) || cue?.reviewedShape || cue?.automaticShape || cue?.effectiveShape || cue?.shape || 'X';
+    return visemeShapes.includes(String(shape).toUpperCase()) ? String(shape).toUpperCase() : 'X';
+  };
+  const isVisemeLaneMode = () => (visualChannel === 'vocals' || (editor && selectedChannel === 'vocals')) && (data[stage].vocals?.visemes?.length || 0) > 0;
   const articulationMapper = globalThis.KinetraArticulation ? new globalThis.KinetraArticulation.ArticulationMapper() : null;
   const articulationTable = globalThis.KinetraMouthShapes?.ARTICULATIONS || {};
   const coarticulation = globalThis.KinetraMouthCoarticulation;
@@ -86,7 +92,37 @@
     sourceSelect.add(option);
   });
   audio.src = config.audioSources[0]?.url || '';
-  sourceSelect.addEventListener('change', () => switchAudioSource(sourceSelect.value));
+  function selectedAudioSource() {
+    return config.audioSources.find(source => source.url === sourceSelect.value) || null;
+  }
+
+  function channelForAudioSource(source) {
+    if (!source) return null;
+    if (source.key === 'vocals' || source.key.startsWith('vocals_')) return 'vocals';
+    return channels.includes(source.key) ? source.key : null;
+  }
+
+  function syncVisualizationToAudioSource() {
+    const source = selectedAudioSource();
+    visualChannel = channelForAudioSource(source);
+    if (editor && visualChannel && channelSelect) {
+      selectedChannel = visualChannel;
+      channelSelect.value = visualChannel;
+    }
+    const contextLabel = document.querySelector('#visualization-context');
+    if (contextLabel) contextLabel.textContent = visualChannel
+      ? `Showing ${visualChannel} analysis for this audio source.`
+      : 'Showing all analysis channels for the original audio.';
+    clearSelection();
+    updateEditorMode();
+    renderInspector();
+  }
+
+  syncVisualizationToAudioSource();
+  sourceSelect.addEventListener('change', () => {
+    syncVisualizationToAudioSource();
+    switchAudioSource(sourceSelect.value);
+  });
 
   function scrubberDuration() {
     return Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : Math.max(0, Number(config.durationMs || 0) / 1000);
@@ -146,7 +182,7 @@
   setTimelineZoom(zoomMs / 1000);
   timelineZoomInput?.addEventListener('input', event => setTimelineZoom(event.target.value));
   channelSelect?.addEventListener('change', event => { selectedChannel = event.target.value; clearSelection(); updateEditorMode(); renderInspector(); });
-  document.querySelectorAll('input[name="artifact-stage"]').forEach(input => input.addEventListener('change', event => { stage = event.target.value; clearSelection(); updatePanels(); renderInspector(); }));
+  document.querySelectorAll('input[name="artifact-stage"]').forEach(input => input.addEventListener('change', event => { stage = event.target.value; clearSelection(); updatePanels(); updateEditorMode(); renderInspector(); }));
   confidenceInput?.addEventListener('input', () => { minimumConfidence = Number(confidenceInput.value); confidenceValue.value = minimumConfidence.toFixed(2); });
   lowOnlyInput?.addEventListener('change', () => { if (lowOnlyInput.checked && minimumConfidence === 0) { minimumConfidence = 0.5; confidenceInput.value = '0.5'; confidenceValue.value = '0.50'; } });
 
@@ -407,14 +443,15 @@
   }
 
   function renderClassic(windowData) {
-    const {width, height} = resizeCanvas(570);
+    const visibleChannels = visualChannel ? [visualChannel] : channels;
+    const {width, height} = resizeCanvas(Math.max(180, visibleChannels.length * 86 + 54));
     const plotLeft = 90;
     const plotWidth = width - plotLeft - 16;
     const rowHeight = 86;
     const xFor = time => plotLeft + ((time - windowData.startMs) / (windowData.endMs - windowData.startMs)) * plotWidth;
     renderWindow = {...windowData, plotLeft, plotWidth, rowHeight, xFor};
     context.clearRect(0, 0, width, height); context.font = '12px system-ui'; drawCache = [];
-    channels.forEach((channel, row) => {
+    visibleChannels.forEach((channel, row) => {
       const top = 15 + row * rowHeight; const center = top + rowHeight / 2;
       context.fillStyle = channel === selectedChannel ? '#eff2f8' : '#99a3b5'; context.fillText(channel.toUpperCase(), 8, center + 4);
       context.strokeStyle = '#2a3140'; context.beginPath(); context.moveTo(plotLeft, top + rowHeight); context.lineTo(width, top + rowHeight); context.stroke();
@@ -434,7 +471,7 @@
     const xFor = time => plotLeft + ((time - windowData.startMs) / (windowData.endMs - windowData.startMs)) * plotWidth;
     renderWindow = {...windowData, plotLeft, plotWidth, laneHeight, xFor}; context.clearRect(0, 0, width, height); drawCache = [];
     shapes.forEach((shape, row) => { const top = 8 + row * laneHeight; context.fillStyle = '#eff2f8'; context.fillText(articulationLabel(shape), 8, top + 25); context.strokeStyle = '#2a3140'; context.beginPath(); context.moveTo(plotLeft, top + laneHeight); context.lineTo(width, top + laneHeight); context.stroke(); });
-    visibleItems('vocals', windowData.startMs, windowData.endMs).forEach(cue => { const shape = mouthHelpers.effectiveShape(cue); const row = shapes.indexOf(shape); if (row < 0) return; const x0 = xFor(cue.startMs), x1 = Math.max(x0 + 3, xFor(cue.endMs)), top = 8 + row * laneHeight + 7; context.fillStyle = cue.reviewedShape || cue.source === 'human' ? '#79f5ce' : '#f5b879'; context.fillRect(x0, top, x1 - x0, laneHeight - 14); context.fillStyle = '#17202e'; context.fillText(shape, x0 + 3, top + 18); drawCache.push({item: cue, channel: 'vocals', x0, x1, y0: top, y1: top + laneHeight - 14}); });
+    visibleItems('vocals', windowData.startMs, windowData.endMs).forEach(cue => { const shape = effectiveVisemeShape(cue); const row = shapes.indexOf(shape); if (row < 0) return; const x0 = xFor(cue.startMs), x1 = Math.max(x0 + 3, xFor(cue.endMs)), top = 8 + row * laneHeight + 7; context.fillStyle = cue.reviewedShape || cue.source === 'human' ? '#79f5ce' : '#f5b879'; context.fillRect(x0, top, x1 - x0, laneHeight - 14); context.fillStyle = '#17202e'; context.fillText(shape, x0 + 3, top + 18); drawCache.push({item: cue, channel: 'vocals', x0, x1, y0: top, y1: top + laneHeight - 14}); });
     const playhead = xFor(windowData.nowMs); context.strokeStyle = '#fff'; context.beginPath(); context.moveTo(playhead, 0); context.lineTo(playhead, height); context.stroke();
   }
 
@@ -681,15 +718,17 @@
   }
 
   canvas.addEventListener('pointerdown', event => {
-    if (!editor || stage !== 'reviewed' || event.button !== 0) return;
+    if (event.button !== 0) return;
+    suppressTimelineClick = false;
     const rect = canvas.getBoundingClientRect(); const x = event.clientX - rect.left; const y = event.clientY - rect.top; const hit = findPointerHit(x, y);
-    if (!hit && !event.altKey) {
+    if (!hit && (!editor || stage !== 'reviewed' || !event.altKey)) {
       pointerState = {mode: 'pan', x0: x, startTime: audio.currentTime};
       canvas.classList.add('timeline-panning');
       canvas.setPointerCapture(event.pointerId);
       event.preventDefault();
       return;
     }
+    if (!editor || stage !== 'reviewed') return;
     if (isVisemeLaneMode()) {
       if (!hit) return;
       pointerState = {mode: 'viseme', x0: x, y0: y, x, y, hit, shift: event.shiftKey, moved: false};
@@ -707,6 +746,7 @@
     if (!pointerState) return;
     if (pointerState.mode === 'pan') {
       const rect = canvas.getBoundingClientRect(); const x = event.clientX - rect.left;
+      if (Math.abs(x - pointerState.x0) > 5) suppressTimelineClick = true;
       const millisecondsPerPixel = (renderWindow.endMs - renderWindow.startMs) / renderWindow.plotWidth;
       const duration = audio.duration || Number(config.durationMs || 0) / 1000;
       audio.currentTime = Math.max(0, Math.min(duration || Infinity, pointerState.startTime - ((x - pointerState.x0) * millisecondsPerPixel) / 1000));
@@ -762,6 +802,7 @@
   canvas.addEventListener('pointercancel', () => { pointerState = null; marquee = null; canvas.classList.remove('timeline-panning'); });
 
   canvas.addEventListener('click', event => {
+    if (suppressTimelineClick) { suppressTimelineClick = false; return; }
     if (isDrumLaneMode()) return;
     if (isVisemeLaneMode()) { const rect = canvas.getBoundingClientRect(); const hit = findPointerHit(event.clientX - rect.left, event.clientY - rect.top); if (hit) { selectedId = hit.item.id; selectedObject = hit.item; renderInspector(); } return; }
     const rect = canvas.getBoundingClientRect(); const x = event.clientX - rect.left; const y = event.clientY - rect.top; const row = Math.floor((y - 15) / 86);
@@ -880,14 +921,14 @@
   }
 
   document.addEventListener('keydown', event => {
-    if (!editor) return;
+    const tag = event.target.tagName;
+    if (['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'A', 'AUDIO'].includes(tag) || event.target.isContentEditable) return;
     if (event.code === 'Space' || event.key === ' ') {
       event.preventDefault();
       if (!event.repeat) togglePlayback();
       return;
     }
-    const tag = event.target.tagName;
-    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag) || event.target.isContentEditable) return;
+    if (!editor) return;
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); cursor('undo'); return; }
     if ((event.ctrlKey || event.metaKey) && (event.key.toLowerCase() === 'y' || (event.shiftKey && event.key.toLowerCase() === 'z'))) { event.preventDefault(); cursor('redo'); return; }
     if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); const delta = (event.shiftKey ? 1 : 0.1) * (event.key === 'ArrowLeft' ? -1 : 1); audio.currentTime = Math.max(0, Math.min(audio.duration || Infinity, audio.currentTime + delta)); return; }

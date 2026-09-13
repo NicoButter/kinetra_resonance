@@ -1,1 +1,34 @@
-{% load static %}<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{% block title %}Kinetra Resonance{% endblock %}</title><link rel="stylesheet" href="{% static 'css/app.css' %}">{% block extra_head %}{% endblock %}</head><body><header><a class="brand" href="{% url 'home' %}">KINETRA <span>RESONANCE</span></a><nav><a href="{% url 'track-create' %}">Process music</a><a href="{% url 'lab' %}">Lab</a><a href="/admin/">Admin</a></nav></header><main>{% if messages %}{% for message in messages %}<p class="notice {{ message.tags }}">{{ message }}</p>{% endfor %}{% endif %}{% block content %}{% endblock %}</main><footer>Kinetra Resonance processes files supplied by users. Use only content you have the right to process.</footer></body></html>
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{% block title %}Kinetra Resonance{% endblock %}</title>
+  <link rel="stylesheet" href="{% static 'css/app.css' %}">
+  {% block extra_head %}{% endblock %}
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="site-header">
+    <a class="brand brand-lockup" href="{% url 'home' %}" aria-label="Kinetra Resonance home">KINETRA <span>RESONANCE</span></a>
+    <nav class="site-nav" aria-label="Main navigation">
+      <a href="{% url 'home' %}#how-it-works">How it works</a>
+      <a href="{% url 'home' %}#recent-tracks">Recent tracks</a>
+      <a href="{% url 'lab' %}"{% if request.resolver_match.url_name == 'lab' %} aria-current="page"{% endif %}>Lab</a>
+      <a class="button nav-cta" href="{% url 'track-create' %}">Upload audio</a>
+    </nav>
+  </header>
+  <main id="main-content" tabindex="-1">
+    {% if messages %}{% for message in messages %}<p class="notice {{ message.tags }}">{{ message }}</p>{% endfor %}{% endif %}
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="site-footer">
+    <div class="footer-top">
+      <div><a class="brand brand-lockup" href="{% url 'home' %}">KINETRA <span>RESONANCE</span></a><p>Explore the layers behind the music.</p></div>
+      <div class="footer-credit"><span>Developed by</span><img src="{% static 'images/vetrabyte-logo.webp' %}" alt="Vetrabyte — Software Development" width="200" height="80" loading="lazy"></div>
+    </div>
+    <div class="footer-bottom"><p>Process only audio you have the right to use.</p><nav aria-label="Footer navigation"><a href="{% url 'lab' %}">Open lab</a><a href="/admin/">Admin</a></nav></div>
+  </footer>
+</body>
+</html>
