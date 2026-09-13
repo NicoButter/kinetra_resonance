@@ -1,8 +1,8 @@
 # Kinetra Resonance
 
-**Music Separation & Analysis Engine**
+**Music Separation & Analysis Engine · PK Teleo integration**
 
-Kinetra Resonance converts music into structured temporal data for visual and tactile experiences. Stem separation is an intermediate processing step, not the final product.
+Kinetra Resonance converts music into structured temporal data for visual and tactile experiences. The system prepares `teleo_experience*.json` packages for integration with PK Teleo. Stem separation is an intermediate processing step, not the final product.
 
 ```text
 Audio original

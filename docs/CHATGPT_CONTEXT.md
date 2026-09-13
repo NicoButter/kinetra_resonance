@@ -4,7 +4,7 @@ Copiá este documento al iniciar una conversación nueva sobre el proyecto. Desc
 
 ---
 
-Estamos construyendo **Kinetra Resonance**, una herramienta local y open source para separar música en stems, analizar audio y producir datos estructurados para aplicaciones visuales y hápticas, en especial una futura integración con Teleo Música.
+Estamos construyendo **Kinetra Resonance**, una herramienta local y open source para separar música en stems, analizar audio y producir datos estructurados para aplicaciones visuales y hápticas, con paquetes preparados para integrarse con PK Teleo Música.
 
 ## Objetivo del producto
 
