@@ -4,6 +4,16 @@
 
 Kinetra Resonance converts music into structured temporal data for visual and tactile experiences. The system prepares `teleo_experience*.json` packages for integration with PK Teleo. Stem separation is an intermediate processing step, not the final product.
 
+<p align="center">
+  <img src="static/images/logo-navbar.png" alt="Kinetra Resonance" width="300">
+  &nbsp;&nbsp;&nbsp;
+  <img src="static/images/logo-teleo.png" alt="PK Teleo" width="260">
+  &nbsp;&nbsp;&nbsp;
+  <img src="static/images/vetrabyte-logo.webp" alt="Vetrabyte Software Development" width="300">
+</p>
+
+<p align="center"><strong>Producto de Vetrabyte · desarrollado por Nicolás Butterfield · integrado con PK Teleo</strong></p>
+
 ```text
 Audio original
   ├─ audio-separator + htdemucs_6s → 6 stems → análisis musical
@@ -210,13 +220,8 @@ Kinetra Resonance no descarga música ni elude DRM. Las personas usuarias son re
 
 ## Autoría
 
-<p align="center">
-  <img src="static/images/vetrabyte-logo.webp" alt="Vetrabyte Software Development" width="480">
-</p>
+Kinetra Resonance es un producto de **Vetrabyte**, desarrollado por **Nicolás Butterfield**. El sistema prepara la experiencia estructurada para integrarse con **PK Teleo**.
 
-Kinetra Resonance fue desarrollado por **Vetrabyte**.
-
-- Autor: Nicolás Butterfield
 - Contacto: [nicobutter@gmail.com](mailto:nicobutter@gmail.com)
 
 ## Licencia
