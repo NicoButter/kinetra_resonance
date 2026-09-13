@@ -7,12 +7,15 @@ Kinetra Resonance converts music into structured temporal data for visual and ta
 <p align="center">
   <img src="static/images/logo-navbar.webp" alt="Kinetra Resonance" width="300">
   &nbsp;&nbsp;&nbsp;
-  <img src="static/images/logo-teleo.webp" alt="PK Teleo" width="260">
+  <a href="https://github.com/NicoButter/teleo"><img src="static/images/logo-teleo.webp" alt="PK Teleo" width="260"></a>
   &nbsp;&nbsp;&nbsp;
-  <img src="static/images/vetrabyte-logo.webp" alt="Vetrabyte Software Development" width="300">
+  <a href="https://vetrabyte.com.ar"><img src="static/images/vetrabyte-logo.webp" alt="Vetrabyte Software Development" width="300"></a>
 </p>
 
 <p align="center"><strong>Producto de Vetrabyte · desarrollado por Nicolás Butterfield · integrado con PK Teleo</strong></p>
+
+- [Repositorio de PK Teleo](https://github.com/NicoButter/teleo)
+- [Vetrabyte](https://vetrabyte.com.ar)
 
 ```text
 Audio original
